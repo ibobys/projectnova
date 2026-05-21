@@ -5,11 +5,7 @@ from nextcord import Interaction, SlashOption
 import asyncio
 import re
 from datetime import timedelta
- 
-# ═══════════════════════════════════════════════════════════════
-#                         CONFIG
-# ═══════════════════════════════════════════════════════════════
- 
+
 TOKEN = os.getenv("TOKEN")
  
 VERIFIED_ROLE_ID     = 1482031063936139264   # Doğrulama rolü (yeşil tik)
