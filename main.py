@@ -1,4 +1,4 @@
- 
+import os
 import nextcord
 from nextcord.ext import commands
 from nextcord import Interaction, SlashOption
