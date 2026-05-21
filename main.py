@@ -1,8 +1,3 @@
-╔══════════════════════════════════════════════════════════════╗
-║              PROJECT NOVA — Discord Bot  (main.py)          ║
-║  Kütüphane : pip install nextcord                           ║
-╚══════════════════════════════════════════════════════════════╝
-"""
  
 import nextcord
 from nextcord.ext import commands
