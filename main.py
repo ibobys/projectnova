@@ -13,7 +13,7 @@ AUTO_ROLE_ID         = 1482031140897292563   # Otomatik kayıt rolü
 ANNOUNCEMENT_CH_ID   = 1482021925319344409   # /duyuru-paylas hedef kanalı
 PARTNER_CH_ID        = 1482021699020132486   # /partner-basvuru sadece bu kanal
 REQUEST_CH_ID        = 1482034060678140015   # /istekleriniz sadece bu kanal
-TICKET_LOG_CH_ID          = 1506945404569255967   # Ticket log kanalı
+EMBED_RELAY_CH_ID = 1483112387199504474   # Bu kanalda yazılanlar embed'e dönüşür
 TICKET_CATEGORY_ID        = 1506935742847254568   # Ticket kanallarının oluşacağı kategori
 OZEL_PROJE_CATEGORY_ID    = 1506947665940709376   # Özel proje kanallarının kategorisi
 ONCELIKLI_CATEGORY_ID     = 1506948002525352066   # Öncelikli destek kanallarının kategorisi
@@ -119,6 +119,46 @@ async def on_member_remove(member):
 async def on_message(message):
     if message.author.bot:
         return
+ 
+    # ── Embed Relay Kanalı ──────────────────────────────────────
+    if message.channel.id == EMBED_RELAY_CH_ID:
+        content = message.content.strip()
+        try:
+            await message.delete()
+        except Exception:
+            pass
+ 
+        if content:
+            embed = nextcord.Embed(
+                description=f"**{content}**",
+                color=COLOR_PRIMARY
+            )
+            embed.set_author(
+                name=message.author.display_name,
+                icon_url=message.author.display_avatar.url
+            )
+            embed.set_footer(text="✦ ibobys.dev")
+ 
+            view = nextcord.ui.View(timeout=None)
+            thanks_btn = nextcord.ui.Button(
+                label="· Teşekkürler",
+                style=nextcord.ButtonStyle.secondary,
+                custom_id=f"thanks_{message.id}"
+            )
+ 
+            async def thanks_callback(inter: Interaction):
+                await inter.response.send_message(
+                    embed=nova_embed("🙏 Teşekkürler!", f"{inter.user.mention} teşekkürlerini iletti!", COLOR_SUCCESS),
+                    ephemeral=True
+                )
+ 
+            thanks_btn.callback = thanks_callback
+            view.add_item(thanks_btn)
+ 
+            await message.channel.send(embed=embed, view=view)
+        return
+    # ────────────────────────────────────────────────────────────
+ 
     if contains_banned_word(message.content):
         try:
             await message.delete()
@@ -1059,3 +1099,4 @@ async def oncelikli_destek_kur(interaction: Interaction):
 # ═══════════════════════════════════════════════════════════════
  
 bot.run(TOKEN)
+ 
