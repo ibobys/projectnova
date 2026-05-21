@@ -1,668 +1,574 @@
+╔══════════════════════════════════════════════════════════════╗
+║              PROJECT NOVA — Discord Bot  (main.py)          ║
+║  Kütüphane : pip install nextcord                           ║
+╚══════════════════════════════════════════════════════════════╝
 """
-╔══════════════════════════════════════════════════════════════════╗
-║              PROJECT NOVA — Discord Bot  (Python)                ║
-║                      Tek dosya: main.py                          ║
-║                   Railway Variables üzerinden çalışır            ║
-╚══════════════════════════════════════════════════════════════════╝
-
-Railway → Projen → Variables kısmına şunları ekle:
-    BOT_TOKEN  = discord bot tokenin
-    CLIENT_ID  = uygulama id
-    GUILD_ID   = sunucu id
-"""
-
-import os
+ 
+import nextcord
+from nextcord.ext import commands
+from nextcord import Interaction, SlashOption
 import asyncio
-import discord
-from discord.ext import commands, tasks
-from discord import option
-
-# ══════════════════════════════════════════════════════════════════
-#  CONFIG — Railway Variables'tan otomatik okunur
-# ══════════════════════════════════════════════════════════════════
-TOKEN = os.getenv("TOKEN")
-CLIENT_ID = int(os.getenv("CLIENT_ID"))
-GUILD_ID = int(os.getenv("GUILD_ID"))
-
-VERIFIED_ROLE_ID      = 1482031063936139264   # Doğrulama rolü
-ANNOUNCEMENT_CH_ID    = 1482021925319344409   # Duyuru kanalı
-PARTNER_CH_ID         = 1482021699020132486   # Partner başvuru kanalı
-REQUEST_CH_ID         = 1482034060678140015   # İstek/öneri kanalı
-TICKET_CATEGORY_ID    = None                  # Ticket kategorisi (None = kategorisiz)
-
+import re
+from datetime import timedelta
+ 
+# ═══════════════════════════════════════════════════════════════
+#                         CONFIG
+# ═══════════════════════════════════════════════════════════════
+ 
+TOKEN = "BURAYA_BOT_TOKENINI_YAZ"
+ 
+VERIFIED_ROLE_ID     = 1482031063936139264   # Doğrulama rolü (yeşil tik)
+ANNOUNCEMENT_CH_ID   = 1482021925319344409   # /duyuru-paylas hedef kanalı
+PARTNER_CH_ID        = 1482021699020132486   # /partner-basvuru sadece bu kanal
+REQUEST_CH_ID        = 1482034060678140015   # /istekleriniz sadece bu kanal
+ 
+COLOR_PRIMARY  = 0x7B2FBE
+COLOR_SUCCESS  = 0x2ECC71
+COLOR_ERROR    = 0xE74C3C
+COLOR_WARNING  = 0xF39C12
+COLOR_INFO     = 0x3498DB
+COLOR_TICKET   = 0x5865F2
+ 
+# Küfür listesi — istediğiniz kelimeleri ekleyin
 BANNED_WORDS = [
-    "küfür1", "küfür2", "orospu", "sik", "göt", "amk", "amına",
-    "bok", "piç", "oç", "siktir", "fuck", "shit", "bitch",
-    "asshole", "bastard",
+    "küfür1", "küfür2", "küfür3",
 ]
-
-# ══════════════════════════════════════════════════════════════════
-#  BOT SETUP
-# ══════════════════════════════════════════════════════════════════
-intents = discord.Intents.default()
-intents.members        = True
+ 
+open_tickets: dict = {}  # user_id -> channel_id
+ 
+# ═══════════════════════════════════════════════════════════════
+#                     BOT KURULUMU
+# ═══════════════════════════════════════════════════════════════
+ 
+intents = nextcord.Intents.default()
 intents.message_content = True
-intents.presences      = True
-
-bot = commands.Bot(
-    intents=intents,
-    debug_guilds=[GUILD_ID],   # Slash komutları anında bu sunucuya yüklenir
-)
-
-# Açık ticketları takip et  { user_id: channel_id }
-open_tickets: dict[int, int] = {}
-
-
-# ══════════════════════════════════════════════════════════════════
-#  YARDIMCI FONKSİYONLAR
-# ══════════════════════════════════════════════════════════════════
-def nova_embed(
-    title: str,
-    description: str,
-    color: discord.Color = discord.Color.blurple(),
-) -> discord.Embed:
-    embed = discord.Embed(title=title, description=description, color=color)
-    embed.set_author(name="Project Nova")
-    embed.set_footer(text="Project Nova • Bot Sistemi")
-    embed.timestamp = discord.utils.utcnow()
-    return embed
-
-
-def contains_banned(text: str) -> bool:
-    low = text.lower()
-    return any(w in low for w in BANNED_WORDS)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  EVENTS
-# ══════════════════════════════════════════════════════════════════
+intents.members          = True
+ 
+bot = commands.Bot(command_prefix="!", intents=intents)
+ 
+# ═══════════════════════════════════════════════════════════════
+#                       YARDIMCI
+# ═══════════════════════════════════════════════════════════════
+ 
+def nova_embed(title, description="", color=COLOR_PRIMARY):
+    e = nextcord.Embed(title=title, description=description, color=color)
+    e.set_footer(text="✦ Project Nova")
+    return e
+ 
+def contains_banned_word(text):
+    lowered = text.lower()
+    for word in BANNED_WORDS:
+        if re.search(rf"\b{re.escape(word.lower())}\b", lowered):
+            return True
+    return False
+ 
+async def is_admin(interaction):
+    return interaction.user.guild_permissions.administrator
+ 
+async def check_channel(interaction, allowed_id):
+    if interaction.channel_id != allowed_id:
+        ch = interaction.guild.get_channel(allowed_id)
+        mention = ch.mention if ch else f"<#{allowed_id}>"
+        await interaction.response.send_message(
+            embed=nova_embed("❌  Yanlış Kanal",
+                f"Bu komutu yalnızca {mention} kanalında kullanabilirsiniz.", COLOR_ERROR),
+            ephemeral=True,
+        )
+        return False
+    return True
+ 
+# ═══════════════════════════════════════════════════════════════
+#                         OLAYLAR
+# ═══════════════════════════════════════════════════════════════
+ 
 @bot.event
 async def on_ready():
     print(f"✅  {bot.user} olarak giriş yapıldı!")
-    update_activity.start()
-
-
-@tasks.loop(minutes=1)
-async def update_activity():
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        await bot.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name=f"{guild.member_count} Üye ile Büyüyoruz 🚀",
-            )
-        )
-
-
-# ══════════════════════════════════════════════════════════════════
-#  KÜFÜR FİLTRESİ
-# ══════════════════════════════════════════════════════════════════
+    total = sum(g.member_count for g in bot.guilds)
+    await bot.change_presence(
+        activity=nextcord.Activity(type=nextcord.ActivityType.watching,
+            name=f"{total} Üye ile Büyüyoruz 🚀")
+    )
+ 
 @bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or not message.guild:
+async def on_member_join(member):
+    total = sum(g.member_count for g in bot.guilds)
+    await bot.change_presence(
+        activity=nextcord.Activity(type=nextcord.ActivityType.watching,
+            name=f"{total} Üye ile Büyüyoruz 🚀")
+    )
+ 
+@bot.event
+async def on_member_remove(member):
+    total = sum(g.member_count for g in bot.guilds)
+    await bot.change_presence(
+        activity=nextcord.Activity(type=nextcord.ActivityType.watching,
+            name=f"{total} Üye ile Büyüyoruz 🚀")
+    )
+ 
+@bot.event
+async def on_message(message):
+    if message.author.bot:
         return
-    if contains_banned(message.content):
+    if contains_banned_word(message.content):
         try:
             await message.delete()
-            warn = await message.channel.send(
-                embed=nova_embed(
-                    "🚫 Küfür Engellendi",
-                    f"{message.author.mention}, sunucu kurallarımız gereği **küfür ve hakaret** içeren "
-                    f"ifadeler yasaktır.\n\nBu mesaj otomatik olarak silindi. Lütfen saygılı bir dil "
-                    f"kullanın.\n\n⚠️ Tekrarlanması durumunda moderasyon işlemi uygulanacaktır.",
-                    discord.Color.red(),
-                )
-            )
-            await asyncio.sleep(8)
+        except Exception:
+            pass
+        warn = await message.channel.send(
+            embed=nova_embed("🚫  Uygunsuz İçerik",
+                f"{message.author.mention}, uygunsuz kelime kullanımı nedeniyle "
+                f"mesajın silindi. Lütfen sunucu kurallarına uy!\n\n"
+                f"Tekrar eden ihlaller ceza ile sonuçlanacaktır.", COLOR_ERROR)
+        )
+        await asyncio.sleep(5)
+        try:
             await warn.delete()
-        except Exception as e:
-            print(f"Küfür silme hatası: {e}")
+        except Exception:
+            pass
     await bot.process_commands(message)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /ticket-kur
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="ticket-kur", description="📋 Ticket sistemini kurarak destek merkezi panelini gönderir.")
-@commands.has_permissions(administrator=True)
-async def ticket_kur(ctx: discord.ApplicationContext):
-    options = [
-        discord.SelectOption(label="Sipariş",            description="Yeni bir sipariş vermek istiyorum",          value="siparis",       emoji="⭐"),
-        discord.SelectOption(label="Destek",             description="Bir sorunum var, yardım istiyorum",          value="destek",        emoji="🌟"),
-        discord.SelectOption(label="Proje İsteği",       description="Özel proje talebi oluşturmak istiyorum",     value="proje_istegi",  emoji="💫"),
-        discord.SelectOption(label="Ücretsiz Proje Alma",description="Ücretsiz proje hakkında bilgi almak istiyorum",value="ucretsiz_proje",emoji="✨"),
-        discord.SelectOption(label="Diğer",              description="Diğer konular hakkında",                     value="diger",         emoji="🔮"),
-    ]
-    select = discord.ui.Select(
-        placeholder="📂 Bir kategori seç...",
-        options=options,
-        custom_id="ticket_select",
-    )
-
-    async def ticket_select_cb(interaction: discord.Interaction):
-        await handle_ticket_select(interaction, select.values[0])
-
-    select.callback = ticket_select_cb
-
-    view = discord.ui.View(timeout=None)
-    view.add_item(select)
-
-    embed = discord.Embed(
-        title="🎫  Destek Merkezi",
-        description=(
-            "**🧭 Destek Merkezi Hakkında.**\n"
-            "Aşağıdaki seçeneklerden uygun olanı seçerek hemen bir ticket oluşturabilirsiniz.\n\n"
-            "**📌 Sunucu Bilgisi.**\n"
-            "Gereksiz ticket açmayın, Sunucu Kurallarını Okumayı Unutmayın."
-        ),
-        color=discord.Color.blurple(),
-    )
-    embed.set_author(name="Project Nova")
-    embed.set_footer(text="Project Nova • Ticket Sistemi")
-    embed.timestamp = discord.utils.utcnow()
-
-    await ctx.channel.send(embed=embed, view=view)
-    await ctx.respond("✅ Ticket paneli başarıyla gönderildi!", ephemeral=True)
-
-
-async def handle_ticket_select(interaction: discord.Interaction, value: str):
-    guild = interaction.guild
-    user  = interaction.user
-
-    if user.id in open_tickets:
-        ch = guild.get_channel(open_tickets[user.id])
-        if ch:
-            await interaction.response.send_message(
-                embed=nova_embed(
-                    "⚠️ Zaten Açık Ticket Var",
-                    f"Zaten açık bir ticketin mevcut: {ch.mention}\nLütfen önce mevcut ticketini kapat.",
-                    discord.Color.orange(),
-                ),
-                ephemeral=True,
-            )
-            return
-
-    labels = {
-        "siparis":       "📦 Sipariş",
-        "destek":        "🛠️ Destek",
-        "proje_istegi":  "💻 Proje İsteği",
-        "ucretsiz_proje":"🎁 Ücretsiz Proje",
-        "diger":         "📌 Diğer",
-    }
-    label = labels.get(value, "Ticket")
-    ch_name = f"ticket-{user.name[:12].lower()}-{str(user.id)[-4:]}"
-
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-    }
-
-    try:
-        category = guild.get_channel(TICKET_CATEGORY_ID) if TICKET_CATEGORY_ID else None
+ 
+# ═══════════════════════════════════════════════════════════════
+#               TİCKET SİSTEMİ — /ticket-kur
+# ═══════════════════════════════════════════════════════════════
+ 
+class TicketCategorySelect(nextcord.ui.Select):
+    def __init__(self):
+        options = [
+            nextcord.SelectOption(label="Sipariş",            description="Yeni bir sipariş vermek istiyorum",              emoji="⭐", value="siparis"),
+            nextcord.SelectOption(label="Destek",             description="Bir sorunum var, yardım istiyorum",              emoji="💫", value="destek"),
+            nextcord.SelectOption(label="Proje İsteği",       description="Özel proje talebi oluşturmak istiyorum",        emoji="🌟", value="proje_istegi"),
+            nextcord.SelectOption(label="Ücretsiz Proje Alma",description="Ücretsiz proje hakkında bilgi almak istiyorum", emoji="✨", value="ucretsiz_proje"),
+            nextcord.SelectOption(label="Diğer",              description="Diğer konular hakkında",                        emoji="💠", value="diger"),
+        ]
+        super().__init__(placeholder="📂  Bir kategori seç...", min_values=1, max_values=1,
+                         options=options, custom_id="ticket_category_select")
+ 
+    async def callback(self, interaction: Interaction):
+        guild  = interaction.guild
+        user   = interaction.user
+        choice = self.values[0]
+        labels = {
+            "siparis":        ("Sipariş",              "⭐"),
+            "destek":         ("Destek",               "💫"),
+            "proje_istegi":   ("Proje İsteği",         "🌟"),
+            "ucretsiz_proje": ("Ücretsiz Proje Alma",  "✨"),
+            "diger":          ("Diğer",                "💠"),
+        }
+        label, emoji = labels.get(choice, ("Ticket", "🎫"))
+ 
+        if user.id in open_tickets:
+            existing = guild.get_channel(open_tickets[user.id])
+            if existing:
+                await interaction.response.send_message(
+                    embed=nova_embed("⚠️  Mevcut Ticket",
+                        f"Zaten açık bir ticket'ın var: {existing.mention}\nÖnce mevcut ticket'ını kapat.",
+                        COLOR_WARNING), ephemeral=True)
+                return
+ 
+        overwrites = {
+            guild.default_role: nextcord.PermissionOverwrite(view_channel=False),
+            user: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+        }
         ticket_ch = await guild.create_text_channel(
-            name=ch_name,
+            name=f"ticket-{user.name}",
             overwrites=overwrites,
-            category=category,
+            topic=f"{emoji} {label} | {user} tarafından açıldı",
         )
         open_tickets[user.id] = ticket_ch.id
-
-        close_btn = discord.ui.Button(
-            label="🔒 Ticketi Kapat",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"ticket_close_{ticket_ch.id}",
-        )
-
-        async def close_cb(i: discord.Interaction):
-            embed_c = nova_embed(
-                "🔒 Ticket Kapatılıyor",
-                f"Bu ticket **{i.user}** tarafından kapatıldı.\nKanal 5 saniye içinde silinecek.",
-                discord.Color.red(),
-            )
-            await i.response.send_message(embed=embed_c)
-            # Ticket map'ten kaldır
-            for uid, cid in list(open_tickets.items()):
-                if cid == ticket_ch.id:
-                    del open_tickets[uid]
-                    break
-            await asyncio.sleep(5)
-            await ticket_ch.delete()
-
-        close_btn.callback = close_cb
-        close_view = discord.ui.View(timeout=None)
-        close_view.add_item(close_btn)
-
-        ticket_embed = discord.Embed(
-            title=f"{label} — Ticket Açıldı",
+ 
+        close_view = CloseTicketView()
+        ticket_embed = nextcord.Embed(
+            title=f"{emoji}  {label} — Ticket Açıldı",
             description=(
                 f"Merhaba {user.mention}! 👋\n\n"
-                f"**Project Nova Destek Ekibine** hoş geldiniz.\n\n"
-                f"📋 **Ticket Konusu:** {label}\n"
-                f"👤 **Açan:** {user}\n"
-                f"📅 **Açılış:** {discord.utils.format_dt(discord.utils.utcnow(), 'F')}\n\n"
-                f"Lütfen sorununuzu veya talebinizi detaylı olarak açıklayın. "
-                f"Ekibimiz en kısa sürede size yardımcı olacaktır.\n\n"
-                f"⏱️ Ortalama yanıt süremiz **15-30 dakika**'dır."
+                f"**Kategori:** {emoji} {label}\n\n"
+                f"**📋 Talebini detaylıca açıklaman yeterli**, ekibimiz en kısa sürede sana yardımcı olacak.\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🕒 Ortalama yanıt süresi: **5–30 dakika**\n"
+                f"📌 Lütfen konu dışı mesaj atmaktan kaçının.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Ticket'ı kapatmak için aşağıdaki butona basın."
             ),
-            color=discord.Color.blurple(),
+            color=COLOR_TICKET,
         )
-        ticket_embed.set_author(name="Project Nova")
-        ticket_embed.set_footer(text="Project Nova • Ticket Sistemi")
-        ticket_embed.timestamp = discord.utils.utcnow()
-
-        await ticket_ch.send(content=user.mention, embed=ticket_embed, view=close_view)
-
+        ticket_embed.set_footer(text="✦ Project Nova — Destek Merkezi")
+        await ticket_ch.send(embed=ticket_embed, view=close_view)
         await interaction.response.send_message(
-            embed=nova_embed(
-                "✅ Ticket Oluşturuldu!",
-                f"Ticketin başarıyla oluşturuldu! {ticket_ch.mention}\nSeni yönlendirdik, lütfen kanalı kontrol et.",
-                discord.Color.green(),
-            ),
-            ephemeral=True,
-        )
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Ticket oluşturulamadı: {e}", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /dogrulama
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="dogrulama", description="✅ Doğrulama panelini gönderir.")
-@commands.has_permissions(administrator=True)
-async def dogrulama(ctx: discord.ApplicationContext):
-    verify_btn = discord.ui.Button(
-        label="✅  Doğrulamak İçin Tıkla",
-        style=discord.ButtonStyle.success,
-        custom_id="verify_btn",
-    )
-
-    async def verify_cb(interaction: discord.Interaction):
-        role = interaction.guild.get_role(VERIFIED_ROLE_ID)
-        if not role:
-            await interaction.response.send_message("❌ Doğrulama rolü bulunamadı.", ephemeral=True)
-            return
-        member = interaction.user
-        if role in member.roles:
-            await interaction.response.send_message(
-                embed=nova_embed("✅ Zaten Doğrulandın!", "Zaten doğrulama rolüne sahipsin. Sunucunun tadını çıkar! 🎉", discord.Color.green()),
-                ephemeral=True,
-            )
-            return
+            embed=nova_embed("✅  Ticket Oluşturuldu",
+                f"Ticket kanalın hazır: {ticket_ch.mention}\nBir yetkili en kısa sürede ilgilenecek!",
+                COLOR_SUCCESS), ephemeral=True)
+ 
+ 
+class CloseTicketView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+ 
+    @nextcord.ui.button(label="🔒  Ticket'ı Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_ticket_btn")
+    async def close_ticket(self, button, interaction: Interaction):
+        channel  = interaction.channel
+        owner_id = next((uid for uid, cid in open_tickets.items() if cid == channel.id), None)
+        if owner_id:
+            open_tickets.pop(owner_id, None)
+        await channel.send(embed=nova_embed("🔒  Ticket Kapatıldı",
+            f"Bu ticket {interaction.user.mention} tarafından kapatıldı.\nKanal **5 saniye** içinde silinecek.",
+            COLOR_ERROR))
+        await asyncio.sleep(5)
         try:
-            await member.add_roles(role)
-            await interaction.response.send_message(
-                embed=nova_embed(
-                    "✅ Doğrulama Başarılı!",
-                    f"Merhaba **{member.display_name}**! 🎉\n\n"
-                    f"Doğrulaman tamamlandı ve sunucuya tam erişim sağladın.\n\n"
-                    f"🌟 **Project Nova**'ya hoş geldin!",
-                    discord.Color.green(),
-                ),
-                ephemeral=True,
-            )
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Rol verilemedi: {e}", ephemeral=True)
-
-    verify_btn.callback = verify_cb
-    view = discord.ui.View(timeout=None)
-    view.add_item(verify_btn)
-
-    embed = discord.Embed(
-        title="🔐  Doğrulama Sistemi",
+            await channel.delete(reason="Ticket kapatıldı")
+        except Exception:
+            pass
+ 
+ 
+class TicketPanelView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(TicketCategorySelect())
+ 
+ 
+@bot.slash_command(name="ticket-kur", description="🎫 Destek Merkezi panelini gönderir. (Admin)")
+async def ticket_kur(interaction: Interaction):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    embed = nextcord.Embed(
+        title="🎫  Destek Merkezi",
         description=(
-            "**Project Nova'ya Hoş Geldiniz!**\n\n"
-            "Sunucumuza tam erişim sağlamak için aşağıdaki butona tıklayarak kimliğinizi doğrulayın.\n\n"
-            "✅ Doğruladıktan sonra tüm kanallara erişebileceksiniz.\n\n"
-            "⚠️ Doğrulama yapmadan sunucu içeriğine erişemezsiniz."
+            "**💜  Destek Merkezi Hakkında.**\n"
+            "Aşağıdaki seçeneklerden uygun olanı seçerek hemen bir ticket oluşturabilirsiniz.\n\n"
+            "**📌  Sunucu Bilgisi.**\n"
+            "Gereksiz ticket açmayın, Sunucu Kurallarını Okumayı Unutmayın.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⭐  **Sipariş** — Yeni bir sipariş vermek istiyorum\n"
+            "💫  **Destek** — Bir sorunum var, yardım istiyorum\n"
+            "🌟  **Proje İsteği** — Özel proje talebi oluşturmak istiyorum\n"
+            "✨  **Ücretsiz Proje Alma** — Ücretsiz proje hakkında bilgi almak istiyorum\n"
+            "💠  **Diğer** — Diğer konular hakkında\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
-        color=discord.Color.green(),
+        color=COLOR_TICKET,
     )
-    embed.set_author(name="Project Nova")
-    embed.set_footer(text="Project Nova • Doğrulama Sistemi")
-    embed.timestamp = discord.utils.utcnow()
-
-    await ctx.channel.send(embed=embed, view=view)
-    await ctx.respond("✅ Doğrulama paneli başarıyla gönderildi!", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /dogrula  (admin — manuel)
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="dogrula", description="🛡️ Belirtilen kullanıcıya manuel olarak doğrulama rolü ver.")
-@commands.has_permissions(administrator=True)
-@option("kullanıcı", discord.Member, description="Doğrulanacak kullanıcıyı seçin.")
-async def dogrula(ctx: discord.ApplicationContext, kullanıcı: discord.Member):
-    role = ctx.guild.get_role(VERIFIED_ROLE_ID)
-    if not role:
-        await ctx.respond("❌ Doğrulama rolü bulunamadı.", ephemeral=True)
-        return
-    try:
-        await kullanıcı.add_roles(role)
-        await ctx.respond(
-            embed=nova_embed(
-                "✅ Manuel Doğrulama",
-                f"{kullanıcı.mention} kullanıcısına başarıyla **doğrulama rolü** verildi.\n\n"
-                f"👤 İşlemi yapan: {ctx.author.mention}\n"
-                f"🕐 Tarih: {discord.utils.format_dt(discord.utils.utcnow(), 'F')}",
-                discord.Color.green(),
+    embed.set_footer(text="✦ Project Nova — Destek Merkezi")
+    await interaction.channel.send(embed=embed, view=TicketPanelView())
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Panel Gönderildi", "Ticket paneli başarıyla gönderildi!", COLOR_SUCCESS), ephemeral=True)
+ 
+# ═══════════════════════════════════════════════════════════════
+#            DOĞRULAMA — /dogrulama
+# ═══════════════════════════════════════════════════════════════
+ 
+class VerifyView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+ 
+    @nextcord.ui.button(label="✅  Doğrula — Sunucuya Katıl", style=nextcord.ButtonStyle.success, custom_id="verify_btn")
+    async def verify(self, button, interaction: Interaction):
+        role = interaction.guild.get_role(VERIFIED_ROLE_ID)
+        if role is None:
+            return await interaction.response.send_message(
+                embed=nova_embed("⚠️  Hata", "Doğrulama rolü bulunamadı. Yetkili ile iletişime geçin.", COLOR_WARNING),
+                ephemeral=True)
+        if role in interaction.user.roles:
+            return await interaction.response.send_message(
+                embed=nova_embed("ℹ️  Zaten Doğrulandın", "Zaten doğrulanmışsın! Sunucunun tadını çıkar 🎉", COLOR_INFO),
+                ephemeral=True)
+        await interaction.user.add_roles(role, reason="Doğrulama butonu")
+        await interaction.response.send_message(
+            embed=nova_embed("🎉  Hoş Geldin!",
+                f"{interaction.user.mention} **Project Nova**'ya hoş geldin!\n\n"
+                f"✅ Doğrulandın ve tüm kanallara erişim kazandın.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📌 Kuralları oku ve eğlenceli zaman geçir! 🚀",
+                COLOR_SUCCESS), ephemeral=True)
+ 
+ 
+@bot.slash_command(name="dogrulama", description="✅ Doğrulama panelini gönderir. (Admin)")
+async def dogrulama(interaction: Interaction):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    embed = nextcord.Embed(
+        title="🔐  Sunucu Doğrulama Sistemi",
+        description=(
+            "**Project Nova'ya Hoş Geldin!** 🎉\n\n"
+            "Sunucumuza tam erişim kazanmak için aşağıdaki **Doğrula** butonuna basman yeterli.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✅  Butona bastıktan sonra tüm kanallara erişim kazanacaksın.\n"
+            "📌  Lütfen kuralları oku ve eğlenceli zaman geçir!\n"
+            "🚀  Umarız aramızda keyifli zaman geçirirsin.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ),
+        color=COLOR_PRIMARY,
+    )
+    embed.set_footer(text="✦ Project Nova — Doğrulama Sistemi")
+    await interaction.channel.send(embed=embed, view=VerifyView())
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Panel Gönderildi", "Doğrulama paneli başarıyla gönderildi!", COLOR_SUCCESS), ephemeral=True)
+ 
+# ═══════════════════════════════════════════════════════════════
+#             DUYURU — /duyuru-paylas
+# ═══════════════════════════════════════════════════════════════
+ 
+@bot.slash_command(name="duyuru-paylas", description="📢 Duyuru kanalına mesaj gönderir. (Admin)")
+async def duyuru_paylas(interaction: Interaction,
+    mesaj: str = SlashOption(name="mesaj", description="Duyuru metni", required=True)):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    ch = interaction.guild.get_channel(ANNOUNCEMENT_CH_ID)
+    if ch is None:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Duyuru kanalı bulunamadı.", COLOR_ERROR), ephemeral=True)
+    embed = nextcord.Embed(title="📢  Yeni Duyuru", description=mesaj, color=COLOR_PRIMARY)
+    embed.set_author(name=f"{interaction.user.display_name} tarafından", icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text="✦ Project Nova — Duyuru")
+    await ch.send("@everyone", embed=embed)
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Duyuru Gönderildi", f"Duyurun {ch.mention} kanalına gönderildi!", COLOR_SUCCESS), ephemeral=True)
+ 
+# ═══════════════════════════════════════════════════════════════
+#          PARTNER BAŞVURU — /partner-basvuru
+# ═══════════════════════════════════════════════════════════════
+ 
+class PartnerModal(nextcord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="🤝  Partner Başvuru Formu")
+        self.uye_sayisi = nextcord.ui.TextInput(
+            label="Sunucunuz Kaç Kişi?", placeholder="Örn: 500", max_length=10)
+        self.everyone_limit = nextcord.ui.TextInput(
+            label="Everyone Limiti (Everyone mi / Everyonesiz mi?)",
+            placeholder="Örn: Everyone var / Everyone yok", max_length=50)
+        self.neden_biz = nextcord.ui.TextInput(
+            label="Neden Biz? (Neden Partnerlik İstiyorsunuz?)",
+            placeholder="Partnerlik yapmak istemenizin sebebini yazın...",
+            style=nextcord.TextInputStyle.paragraph, max_length=500)
+        self.add_item(self.uye_sayisi)
+        self.add_item(self.everyone_limit)
+        self.add_item(self.neden_biz)
+ 
+    async def callback(self, interaction: Interaction):
+        embed = nextcord.Embed(
+            title="🤝  Yeni Partner Başvurusu",
+            description=(
+                f"**Başvuran:** {interaction.user.mention} (`{interaction.user}`)\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👥  **Üye Sayısı:** {self.uye_sayisi.value}\n\n"
+                f"📢  **Everyone Limiti:** {self.everyone_limit.value}\n\n"
+                f"💬  **Neden Biz:**\n{self.neden_biz.value}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             ),
-            ephemeral=True,
+            color=COLOR_PRIMARY,
         )
-    except Exception as e:
-        await ctx.respond(f"❌ Rol verilemedi: {e}", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /duyuru-paylas
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="duyuru-paylas", description="📣 Duyuru kanalına mesaj gönderir.")
-@commands.has_permissions(administrator=True)
-@option("metin", str, description="Duyuruda yayınlanacak metni girin.")
-async def duyuru_paylas(ctx: discord.ApplicationContext, metin: str):
-    ch = bot.get_channel(ANNOUNCEMENT_CH_ID)
-    if not ch:
-        await ctx.respond("❌ Duyuru kanalı bulunamadı.", ephemeral=True)
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text="✦ Project Nova — Partner Başvuru")
+        partner_ch = interaction.guild.get_channel(PARTNER_CH_ID)
+        if partner_ch:
+            await partner_ch.send(embed=embed)
+        await interaction.response.send_message(
+            embed=nova_embed("✅  Başvurunuz Alındı!",
+                "Partner başvurunuz başarıyla gönderildi! ✅\n"
+                "Ekibimiz en kısa sürede değerlendirerek size dönüş yapacak. 🤝",
+                COLOR_SUCCESS), ephemeral=True)
+ 
+ 
+@bot.slash_command(name="partner-basvuru", description="🤝 Partner başvuru formunu açar.")
+async def partner_basvuru(interaction: Interaction):
+    if not await check_channel(interaction, PARTNER_CH_ID):
         return
-
-    embed = discord.Embed(
-        title="📣  Yeni Duyuru",
-        description=metin,
-        color=discord.Color.gold(),
-    )
-    embed.set_author(name="Project Nova Duyuru")
-    embed.set_footer(text=f"Duyuruyu yapan: {ctx.author}")
-    embed.timestamp = discord.utils.utcnow()
-
-    await ch.send(content="@everyone", embed=embed)
-    await ctx.respond(f"✅ Duyuru <#{ANNOUNCEMENT_CH_ID}> kanalına başarıyla gönderildi!", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /ban
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="ban", description="🔨 Belirtilen kullanıcıyı sunucudan kalıcı olarak yasaklar.")
-@commands.has_permissions(ban_members=True)
-@option("kullanıcı", discord.Member, description="Banlanacak kullanıcıyı seçin.")
-@option("sebep", str, description="Banlama sebebini girin.", required=False, default="Sebep belirtilmedi.")
-async def ban(ctx: discord.ApplicationContext, kullanıcı: discord.Member, sebep: str):
-    if not kullanıcı.guild_permissions.administrator is False and kullanıcı.top_role >= ctx.author.top_role:
-        await ctx.respond("❌ Bu kullanıcıyı banlayamazsın. Rolü senden üstte.", ephemeral=True)
+    await interaction.response.send_modal(PartnerModal())
+ 
+# ═══════════════════════════════════════════════════════════════
+#              İSTEKLER — /istekleriniz
+# ═══════════════════════════════════════════════════════════════
+ 
+class RequestModal(nextcord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="💡  İstek / Öneri Formu")
+        self.istek = nextcord.ui.TextInput(
+            label="İsteğinizi Belirtin",
+            placeholder="Sunucumuz veya botumuz için istek/öneri yazın...",
+            style=nextcord.TextInputStyle.paragraph, max_length=1000)
+        self.add_item(self.istek)
+ 
+    async def callback(self, interaction: Interaction):
+        embed = nextcord.Embed(
+            title="💡  Yeni İstek / Öneri",
+            description=(
+                f"**Gönderen:** {interaction.user.mention} (`{interaction.user}`)\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📝  **İstek/Öneri:**\n{self.istek.value}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            color=COLOR_INFO,
+        )
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(text="✦ Project Nova — İstek Sistemi")
+        req_ch = interaction.guild.get_channel(REQUEST_CH_ID)
+        if req_ch:
+            msg = await req_ch.send(embed=embed)
+            await msg.add_reaction("✅")
+            await msg.add_reaction("❌")
+        await interaction.response.send_message(
+            embed=nova_embed("✅  İsteğiniz Alındı!",
+                "İsteğiniz başarıyla iletildi! 💡\nEkibimiz en kısa sürede inceleyecek. 🙏",
+                COLOR_SUCCESS), ephemeral=True)
+ 
+ 
+@bot.slash_command(name="istekleriniz", description="💡 İstek ve öneri formunu açar.")
+async def istekleriniz(interaction: Interaction):
+    if not await check_channel(interaction, REQUEST_CH_ID):
         return
+    await interaction.response.send_modal(RequestModal())
+ 
+# ═══════════════════════════════════════════════════════════════
+#            MODERASYON — ban / kick / mute
+# ═══════════════════════════════════════════════════════════════
+ 
+@bot.slash_command(name="ban", description="🔨 Belirtilen üyeyi sunucudan yasaklar. (Moderatör)")
+async def ban(interaction: Interaction,
+    uye: nextcord.Member = SlashOption(name="uye", description="Yasaklanacak üye", required=True),
+    sebep: str = SlashOption(name="sebep", description="Yasaklama sebebi", required=False, default="Sebep belirtilmedi"),
+    mesaj_silme: int = SlashOption(name="mesaj_silme", description="Kaç günlük mesaj silinsin? (0-7)",
+        required=False, default=0, min_value=0, max_value=7)):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komutu kullanmak için yetkiniz yok.", COLOR_ERROR), ephemeral=True)
+    if uye.top_role >= interaction.user.top_role:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Kendinizden üst/eşit roldekini yasaklayamazsınız!", COLOR_ERROR), ephemeral=True)
     try:
-        await kullanıcı.ban(reason=f"{ctx.author} tarafından: {sebep}")
-        embed = discord.Embed(title="🔨  Kullanıcı Banlandı", color=discord.Color.red())
-        embed.set_author(name="Project Nova • Moderasyon")
-        embed.add_field(name="👤 Kullanıcı",   value=f"{kullanıcı} ({kullanıcı.id})", inline=True)
-        embed.add_field(name="🛡️ Moderatör",  value=str(ctx.author),                 inline=True)
-        embed.add_field(name="📋 Sebep",        value=sebep,                           inline=False)
-        embed.add_field(name="📅 Tarih",        value=discord.utils.format_dt(discord.utils.utcnow(), "F"), inline=False)
-        embed.set_thumbnail(url=kullanıcı.display_avatar.url)
-        embed.set_footer(text="Project Nova • Moderasyon Sistemi")
-        embed.timestamp = discord.utils.utcnow()
-        await ctx.respond(embed=embed)
-    except Exception as e:
-        await ctx.respond(f"❌ Ban işlemi başarısız: {e}", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /kick
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="kick", description="👢 Belirtilen kullanıcıyı sunucudan atar.")
-@commands.has_permissions(kick_members=True)
-@option("kullanıcı", discord.Member, description="Kicklenecek kullanıcıyı seçin.")
-@option("sebep", str, description="Atma sebebini girin.", required=False, default="Sebep belirtilmedi.")
-async def kick(ctx: discord.ApplicationContext, kullanıcı: discord.Member, sebep: str):
+        await uye.send(embed=nova_embed("🔨  Yasaklandınız",
+            f"**{interaction.guild.name}** sunucusundan yasaklandınız.\n\n"
+            f"**Sebep:** {sebep}\n**Yetkili:** {interaction.user}", COLOR_ERROR))
+    except Exception:
+        pass
+    await uye.ban(reason=f"{interaction.user}: {sebep}", delete_message_days=mesaj_silme)
+    embed = nextcord.Embed(title="🔨  Üye Yasaklandı",
+        description=(f"**Yasaklanan:** {uye.mention} (`{uye}`)\n**Yetkili:** {interaction.user.mention}\n"
+            f"**Sebep:** {sebep}\n**Silinen Mesaj:** Son {mesaj_silme} gün\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nBu işlem kalıcıdır."), color=COLOR_ERROR)
+    embed.set_thumbnail(url=uye.display_avatar.url)
+    embed.set_footer(text="✦ Project Nova — Moderasyon")
+    await interaction.response.send_message(embed=embed)
+ 
+ 
+@bot.slash_command(name="kick", description="👢 Belirtilen üyeyi sunucudan atar. (Moderatör)")
+async def kick(interaction: Interaction,
+    uye: nextcord.Member = SlashOption(name="uye", description="Atılacak üye", required=True),
+    sebep: str = SlashOption(name="sebep", description="Atma sebebi", required=False, default="Sebep belirtilmedi")):
+    if not interaction.user.guild_permissions.kick_members:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komutu kullanmak için yetkiniz yok.", COLOR_ERROR), ephemeral=True)
+    if uye.top_role >= interaction.user.top_role:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Kendinizden üst/eşit roldekini atamazsınız!", COLOR_ERROR), ephemeral=True)
     try:
-        await kullanıcı.kick(reason=f"{ctx.author} tarafından: {sebep}")
-        embed = discord.Embed(title="👢  Kullanıcı Atıldı", color=discord.Color.orange())
-        embed.set_author(name="Project Nova • Moderasyon")
-        embed.add_field(name="👤 Kullanıcı",  value=f"{kullanıcı} ({kullanıcı.id})", inline=True)
-        embed.add_field(name="🛡️ Moderatör", value=str(ctx.author),                 inline=True)
-        embed.add_field(name="📋 Sebep",       value=sebep,                           inline=False)
-        embed.add_field(name="📅 Tarih",       value=discord.utils.format_dt(discord.utils.utcnow(), "F"), inline=False)
-        embed.set_thumbnail(url=kullanıcı.display_avatar.url)
-        embed.set_footer(text="Project Nova • Moderasyon Sistemi")
-        embed.timestamp = discord.utils.utcnow()
-        await ctx.respond(embed=embed)
-    except Exception as e:
-        await ctx.respond(f"❌ Kick işlemi başarısız: {e}", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /mute
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="mute", description="🔇 Belirtilen kullanıcıyı susturur. Süre dakika cinsinden girilir.")
-@commands.has_permissions(moderate_members=True)
-@option("kullanıcı", discord.Member, description="Susturulacak kullanıcıyı seçin.")
-@option("süre",      int,            description="Susturma süresi (dakika, maks 40320 = 28 gün).", min_value=1, max_value=40320)
-@option("sebep",     str,            description="Susturma sebebini girin.", required=False, default="Sebep belirtilmedi.")
-async def mute(ctx: discord.ApplicationContext, kullanıcı: discord.Member, süre: int, sebep: str):
-    import datetime
-    duration = datetime.timedelta(minutes=süre)
+        await uye.send(embed=nova_embed("👢  Atıldınız",
+            f"**{interaction.guild.name}** sunucusundan atıldınız.\n\n"
+            f"**Sebep:** {sebep}\n**Yetkili:** {interaction.user}", COLOR_WARNING))
+    except Exception:
+        pass
+    await uye.kick(reason=f"{interaction.user}: {sebep}")
+    embed = nextcord.Embed(title="👢  Üye Atıldı",
+        description=(f"**Atılan:** {uye.mention} (`{uye}`)\n**Yetkili:** {interaction.user.mention}\n"
+            f"**Sebep:** {sebep}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nÜye tekrar katılabilir."),
+        color=COLOR_WARNING)
+    embed.set_thumbnail(url=uye.display_avatar.url)
+    embed.set_footer(text="✦ Project Nova — Moderasyon")
+    await interaction.response.send_message(embed=embed)
+ 
+ 
+@bot.slash_command(name="mute", description="🔇 Belirtilen üyeyi susturur. (Moderatör)")
+async def mute(interaction: Interaction,
+    uye: nextcord.Member = SlashOption(name="uye", description="Susturulacak üye", required=True),
+    sure: int = SlashOption(name="sure", description="Süre (dakika) — 0 = kalıcı (28 gün)", required=False, default=0, min_value=0, max_value=40320),
+    sebep: str = SlashOption(name="sebep", description="Susturma sebebi", required=False, default="Sebep belirtilmedi")):
+    if not interaction.user.guild_permissions.moderate_members:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komutu kullanmak için yetkiniz yok.", COLOR_ERROR), ephemeral=True)
+    if uye.top_role >= interaction.user.top_role:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Kendinizden üst/eşit roldekini susturamazsınız!", COLOR_ERROR), ephemeral=True)
+    sure_str = f"{sure} dakika" if sure > 0 else "Kalıcı (28 gün)"
+    delta = timedelta(minutes=sure) if sure > 0 else timedelta(days=28)
+    await uye.edit(timeout=nextcord.utils.utcnow() + delta, reason=f"{interaction.user}: {sebep}")
     try:
-        await kullanıcı.timeout_for(duration, reason=f"{ctx.author} tarafından: {sebep}")
-
-        if süre >= 60:
-            time_str = f"{süre // 60} saat {süre % 60} dakika"
-        else:
-            time_str = f"{süre} dakika"
-
-        end_ts = discord.utils.utcnow() + duration
-
-        embed = discord.Embed(title="🔇  Kullanıcı Susturuldu", color=discord.Color.purple())
-        embed.set_author(name="Project Nova • Moderasyon")
-        embed.add_field(name="👤 Kullanıcı",    value=f"{kullanıcı} ({kullanıcı.id})",       inline=True)
-        embed.add_field(name="🛡️ Moderatör",   value=str(ctx.author),                        inline=True)
-        embed.add_field(name="⏱️ Süre",         value=time_str,                               inline=True)
-        embed.add_field(name="📋 Sebep",         value=sebep,                                  inline=False)
-        embed.add_field(name="📅 Bitiş Tarihi", value=discord.utils.format_dt(end_ts, "F"),  inline=False)
-        embed.set_thumbnail(url=kullanıcı.display_avatar.url)
-        embed.set_footer(text="Project Nova • Moderasyon Sistemi")
-        embed.timestamp = discord.utils.utcnow()
-        await ctx.respond(embed=embed)
+        await uye.send(embed=nova_embed("🔇  Susturuldunuz",
+            f"**{interaction.guild.name}** sunucusunda susturuldunuz.\n\n"
+            f"**Sebep:** {sebep}\n**Süre:** {sure_str}\n**Yetkili:** {interaction.user}", COLOR_WARNING))
+    except Exception:
+        pass
+    embed = nextcord.Embed(title="🔇  Üye Susturuldu",
+        description=(f"**Susturulan:** {uye.mention} (`{uye}`)\n**Yetkili:** {interaction.user.mention}\n"
+            f"**Sebep:** {sebep}\n**Süre:** {sure_str}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nSüre dolunca otomatik açılır."),
+        color=COLOR_WARNING)
+    embed.set_thumbnail(url=uye.display_avatar.url)
+    embed.set_footer(text="✦ Project Nova — Moderasyon")
+    await interaction.response.send_message(embed=embed)
+ 
+ 
+@bot.slash_command(name="unmute", description="🔊 Üyenin susturmasını kaldırır. (Moderatör)")
+async def unmute(interaction: Interaction,
+    uye: nextcord.Member = SlashOption(name="uye", description="Susturması kaldırılacak üye", required=True)):
+    if not interaction.user.guild_permissions.moderate_members:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komutu kullanmak için yetkiniz yok.", COLOR_ERROR), ephemeral=True)
+    await uye.edit(timeout=None)
+    await interaction.response.send_message(
+        embed=nova_embed("🔊  Susturma Kaldırıldı",
+            f"**Üye:** {uye.mention}\n**Yetkili:** {interaction.user.mention}", COLOR_SUCCESS))
+ 
+ 
+@bot.slash_command(name="unban", description="🔓 Yasaklı üyenin yasağını kaldırır. (Moderatör)")
+async def unban(interaction: Interaction,
+    kullanici_id: str = SlashOption(name="kullanici_id", description="Kullanıcı ID'si", required=True),
+    sebep: str = SlashOption(name="sebep", description="Sebep", required=False, default="Sebep belirtilmedi")):
+    if not interaction.user.guild_permissions.ban_members:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komutu kullanmak için yetkiniz yok.", COLOR_ERROR), ephemeral=True)
+    try:
+        user = await bot.fetch_user(int(kullanici_id))
+        await interaction.guild.unban(user, reason=f"{interaction.user}: {sebep}")
+        await interaction.response.send_message(
+            embed=nova_embed("🔓  Yasak Kaldırıldı",
+                f"**Kullanıcı:** {user} (`{user.id}`)\n**Yetkili:** {interaction.user.mention}\n**Sebep:** {sebep}",
+                COLOR_SUCCESS))
     except Exception as e:
-        await ctx.respond(f"❌ Mute işlemi başarısız: {e}", ephemeral=True)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /uye-sayisi
-# ══════════════════════════════════════════════════════════════════
-@bot.slash_command(name="uye-sayisi", description="👥 Sunucunun güncel üye sayısını gösterir.")
-async def uye_sayisi(ctx: discord.ApplicationContext):
-    guild = ctx.guild
-    online = sum(
-        1 for m in guild.members
-        if m.status != discord.Status.offline and not m.bot
+        await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", f"Yasak kaldırılamadı: {e}", COLOR_ERROR), ephemeral=True)
+ 
+# ═══════════════════════════════════════════════════════════════
+#            ÜYE SAYISI — /uyesayisi
+# ═══════════════════════════════════════════════════════════════
+ 
+@bot.slash_command(name="uyesayisi", description="📊 Sunucunun üye sayısını gösterir.")
+async def uyesayisi(interaction: Interaction):
+    guild  = interaction.guild
+    total  = guild.member_count
+    bots   = sum(1 for m in guild.members if m.bot)
+    humans = total - bots
+    embed  = nextcord.Embed(
+        title="📊  Sunucu İstatistikleri",
+        description=(
+            f"**{guild.name}** sunucusunun güncel üye istatistikleri:\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥  **Toplam Üye:** `{total:,}`\n"
+            f"🧑  **İnsan Üye:** `{humans:,}`\n"
+            f"🤖  **Bot:** `{bots:,}`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📈 **Project Nova ile Büyümeye Devam Ediyoruz!**"
+        ),
+        color=COLOR_PRIMARY,
     )
-    embed = discord.Embed(
-        title="👥  Sunucu İstatistikleri",
-        description=f"**{guild.name}** sunucusunun güncel üye bilgileri:",
-        color=discord.Color.blue(),
-    )
-    embed.set_author(name="Project Nova")
-    embed.add_field(name="📊 Toplam Üye",      value=f"**{guild.member_count}** kişi",                                    inline=True)
-    embed.add_field(name="🟢 Çevrimiçi",       value=f"**{online}** kişi",                                                inline=True)
-    embed.add_field(name="📅 Sunucu Kuruluş",  value=discord.utils.format_dt(guild.created_at, "D"),                     inline=True)
     if guild.icon:
         embed.set_thumbnail(url=guild.icon.url)
-    embed.set_footer(text="Project Nova • İstatistik Sistemi")
-    embed.timestamp = discord.utils.utcnow()
-    await ctx.respond(embed=embed)
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /partner-basvuru  — Modal
-# ══════════════════════════════════════════════════════════════════
-class PartnerModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="🤝 Partnerlik Başvurusu — Project Nova")
-        self.add_item(discord.ui.InputText(
-            label="Sunucunuz Kaç Kişi?",
-            placeholder="Örnek: 1500 üye",
-            max_length=20,
-        ))
-        self.add_item(discord.ui.InputText(
-            label="Everyone Limiti (Everyone/Everyonesiz)",
-            placeholder="Everyone var mı, yok mu?",
-            max_length=50,
-        ))
-        self.add_item(discord.ui.InputText(
-            label="Partnerlik Yapmak İstiyorsunuz",
-            placeholder="Reklam partneri, içerik partneri vb.",
-            max_length=100,
-        ))
-        self.add_item(discord.ui.InputText(
-            label="Neden Biz?",
-            placeholder="Neden Project Nova ile partner olmak istiyorsunuz?",
-            style=discord.InputTextStyle.long,
-            max_length=500,
-        ))
-
-    async def callback(self, interaction: discord.Interaction):
-        member_count = self.children[0].value
-        everyone     = self.children[1].value
-        p_type       = self.children[2].value
-        why_us       = self.children[3].value
-        user         = interaction.user
-
-        embed = discord.Embed(
-            title="🤝  Partnerlik Başvurusu Alındı",
-            description=f"**{user}** bir partnerlik başvurusu gönderdi.",
-            color=discord.Color.blue(),
-        )
-        embed.set_author(name="Yeni Partnerlik Başvurusu")
-        embed.add_field(name="👤 Başvuran",             value=f"{user.mention} ({user})",    inline=True)
-        embed.add_field(name="🆔 Kullanıcı ID",         value=str(user.id),                  inline=True)
-        embed.add_field(name="👥 Sunucu Üye Sayısı",    value=member_count,                  inline=True)
-        embed.add_field(name="📢 Everyone Durumu",      value=everyone,                      inline=True)
-        embed.add_field(name="🤝 Partner Türü",         value=p_type,                        inline=False)
-        embed.add_field(name="💬 Neden Biz?",           value=why_us,                        inline=False)
-        embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text="Project Nova • Partnerlik Sistemi")
-        embed.timestamp = discord.utils.utcnow()
-
-        accept_btn = discord.ui.Button(label="✅ Onayla", style=discord.ButtonStyle.success, custom_id=f"partner_accept_{user.id}")
-        reject_btn = discord.ui.Button(label="❌ Reddet", style=discord.ButtonStyle.danger,  custom_id=f"partner_reject_{user.id}")
-
-        async def accept_cb(i: discord.Interaction):
-            await i.response.send_message(f"✅ {user.mention} için partnerlik başvurusu **onaylandı**.", ephemeral=True)
-
-        async def reject_cb(i: discord.Interaction):
-            await i.response.send_message(f"❌ {user.mention} için partnerlik başvurusu **reddedildi**.", ephemeral=True)
-
-        accept_btn.callback = accept_cb
-        reject_btn.callback = reject_cb
-        action_view = discord.ui.View(timeout=None)
-        action_view.add_item(accept_btn)
-        action_view.add_item(reject_btn)
-
-        ch = bot.get_channel(PARTNER_CH_ID)
-        if ch:
-            await ch.send(embed=embed, view=action_view)
-
-        await interaction.response.send_message(
-            embed=nova_embed(
-                "✅ Başvuru Alındı!",
-                "Partnerlik başvurunuz başarıyla alındı! Ekibimiz inceleyecek ve en kısa sürede geri dönüş yapacaktır.\n\n"
-                "⏱️ İnceleme süresi genellikle **24-48 saat** arasındadır.",
-                discord.Color.green(),
-            ),
-            ephemeral=True,
-        )
-
-
-@bot.slash_command(name="partner-basvuru", description="🤝 Partnerlik başvurusu yapmak için formu açar.")
-async def partner_basvuru(ctx: discord.ApplicationContext):
-    if ctx.channel_id != PARTNER_CH_ID:
-        await ctx.respond(
-            embed=nova_embed(
-                "❌ Yanlış Kanal",
-                f"Bu komut yalnızca <#{PARTNER_CH_ID}> kanalında kullanılabilir!",
-                discord.Color.red(),
-            ),
-            ephemeral=True,
-        )
-        return
-    await ctx.send_modal(PartnerModal())
-
-
-# ══════════════════════════════════════════════════════════════════
-#  /istekleriniz  — Modal
-# ══════════════════════════════════════════════════════════════════
-class RequestModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="💡 İstek & Öneri — Project Nova")
-        self.add_item(discord.ui.InputText(
-            label="İsteğinizi Belirtin",
-            placeholder="Sunucumuz veya botumuz için bir öneriniz var mı? Lütfen detaylı açıklayın...",
-            style=discord.InputTextStyle.long,
-            min_length=10,
-            max_length=1000,
-        ))
-
-    async def callback(self, interaction: discord.Interaction):
-        text = self.children[0].value
-        user = interaction.user
-
-        embed = discord.Embed(
-            title="💡  Yeni İstek Alındı",
-            description=text,
-            color=discord.Color.purple(),
-        )
-        embed.set_author(name="Yeni İstek & Öneri")
-        embed.add_field(name="👤 Gönderen",  value=f"{user.mention} ({user})", inline=True)
-        embed.add_field(name="🆔 ID",        value=str(user.id),               inline=True)
-        embed.add_field(name="📅 Tarih",     value=discord.utils.format_dt(discord.utils.utcnow(), "F"), inline=False)
-        embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text="Project Nova • İstek Sistemi")
-        embed.timestamp = discord.utils.utcnow()
-
-        ch = bot.get_channel(REQUEST_CH_ID)
-        if ch:
-            await ch.send(embed=embed)
-
-        await interaction.response.send_message(
-            embed=nova_embed(
-                "✅ İstek Gönderildi!",
-                "İsteğiniz başarıyla iletildi! Ekibimiz inceleyecek ve değerlendireceğiz.\n\n"
-                "Geri bildiriminiz için teşekkür ederiz! 🙏",
-                discord.Color.green(),
-            ),
-            ephemeral=True,
-        )
-
-
-@bot.slash_command(name="istekleriniz", description="💡 İstek veya öneri göndermek için formu açar.")
-async def istekleriniz(ctx: discord.ApplicationContext):
-    if ctx.channel_id != REQUEST_CH_ID:
-        await ctx.respond(
-            embed=nova_embed(
-                "❌ Yanlış Kanal",
-                f"Bu komut yalnızca <#{REQUEST_CH_ID}> kanalında kullanılabilir!",
-                discord.Color.red(),
-            ),
-            ephemeral=True,
-        )
-        return
-    await ctx.send_modal(RequestModal())
-
-
-# ══════════════════════════════════════════════════════════════════
-#  HATA YÖNETİMİ
-# ══════════════════════════════════════════════════════════════════
-@bot.event
-async def on_application_command_error(ctx: discord.ApplicationContext, error):
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.respond(
-            embed=nova_embed("❌ Yetersiz Yetki", "Bu komutu kullanmak için gerekli yetkiye sahip değilsin.", discord.Color.red()),
-            ephemeral=True,
-        )
-    else:
-        await ctx.respond(f"❌ Bir hata oluştu: {error}", ephemeral=True)
-        raise error
-
-
-# ══════════════════════════════════════════════════════════════════
-#  BAŞLAT
-# ══════════════════════════════════════════════════════════════════
-if __name__ == "__main__":
-    bot.run(TOKEN)
+    embed.set_footer(text="✦ Project Nova — İstatistik")
+    await interaction.response.send_message(embed=embed)
+ 
+# ═══════════════════════════════════════════════════════════════
+#                        BAŞLAT
+# ═══════════════════════════════════════════════════════════════
+ 
+bot.run(TOKEN)
