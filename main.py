@@ -13,8 +13,10 @@ AUTO_ROLE_ID         = 1482031140897292563   # Otomatik kayıt rolü
 ANNOUNCEMENT_CH_ID   = 1482021925319344409   # /duyuru-paylas hedef kanalı
 PARTNER_CH_ID        = 1482021699020132486   # /partner-basvuru sadece bu kanal
 REQUEST_CH_ID        = 1482034060678140015   # /istekleriniz sadece bu kanal
-TICKET_LOG_CH_ID     = 1506945404569255967   # Ticket log kanalı
-TICKET_CATEGORY_ID   = 1506935742847254568   # Ticket kanallarının oluşacağı kategori
+TICKET_LOG_CH_ID          = 1506945404569255967   # Ticket log kanalı
+TICKET_CATEGORY_ID        = 1506935742847254568   # Ticket kanallarının oluşacağı kategori
+OZEL_PROJE_CATEGORY_ID    = 1506947665940709376   # Özel proje kanallarının kategorisi
+ONCELIKLI_CATEGORY_ID     = 1506948002525352066   # Öncelikli destek kanallarının kategorisi
  
 COLOR_PRIMARY  = 0x7B2FBE
 COLOR_SUCCESS  = 0x2ECC71
@@ -28,7 +30,9 @@ BANNED_WORDS = [
     "küfür1", "küfür2", "küfür3",
 ]
  
-open_tickets: dict = {}  # user_id -> channel_id
+open_tickets: dict        = {}  # user_id -> channel_id
+open_ozel_projeler: dict  = {}  # user_id -> channel_id
+open_oncelikli: dict      = {}  # user_id -> channel_id
  
 # ═══════════════════════════════════════════════════════════════
 #                     BOT KURULUMU
@@ -657,8 +661,401 @@ async def uyesayisi(interaction: Interaction):
     await interaction.response.send_message(embed=embed)
  
 # ═══════════════════════════════════════════════════════════════
+#           ÖZEL PROJE SİSTEMİ — /özelproje
+# ═══════════════════════════════════════════════════════════════
+ 
+class OzelProjeCloseView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+ 
+    @nextcord.ui.button(label="🔒  Talebi Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_ozel_proje_btn")
+    async def close_ozel_proje(self, button: nextcord.ui.Button, interaction: Interaction):
+        channel = interaction.channel
+        guild   = interaction.guild
+ 
+        owner_id = None
+        for uid, cid in open_ozel_projeler.items():
+            if cid == channel.id:
+                owner_id = uid
+                break
+ 
+        log_ch = guild.get_channel(TICKET_LOG_CH_ID)
+        if log_ch:
+            log_embed = nextcord.Embed(
+                title="🔒  Özel Proje Talebi Kapatıldı",
+                description=(
+                    f"**Kanal:** {channel.name}\n"
+                    f"**Kapatan:** {interaction.user.mention} (`{interaction.user}`)\n"
+                    + (f"**Talep Sahibi:** <@{owner_id}>" if owner_id else "")
+                ),
+                color=COLOR_ERROR
+            )
+            log_embed.set_footer(text="✦ Project Nova — Ticket Log")
+            log_embed.timestamp = nextcord.utils.utcnow()
+            try:
+                await log_ch.send(embed=log_embed)
+            except Exception as e:
+                print(f"Log gönderilemedi: {e}")
+ 
+        if owner_id:
+            open_ozel_projeler.pop(owner_id, None)
+ 
+        await interaction.response.send_message(
+            embed=nova_embed("🔒  Kapatılıyor...", "Kanal 5 saniye içinde silinecek.", COLOR_WARNING)
+        )
+        await asyncio.sleep(5)
+        try:
+            await channel.delete(reason=f"{interaction.user} tarafından kapatıldı.")
+        except Exception as e:
+            print(f"Kanal silinemedi: {e}")
+ 
+ 
+class OzelProjeTurSelect(nextcord.ui.Select):
+    def __init__(self):
+        options = [
+            nextcord.SelectOption(label="Discord Botu",        description="Özel Discord botu yaptırmak istiyorum",       emoji="🤖", value="discord_bot"),
+            nextcord.SelectOption(label="Web Sitesi",          description="Web sitesi veya web uygulaması istiyorum",     emoji="🌐", value="web_sitesi"),
+            nextcord.SelectOption(label="Discord Sunucusu",    description="Sunucu kurulumu / düzenleme istiyorum",        emoji="🏠", value="discord_sunucu"),
+            nextcord.SelectOption(label="Grafik / Tasarım",    description="Logo, banner veya grafik tasarım istiyorum",   emoji="🎨", value="grafik"),
+            nextcord.SelectOption(label="Diğer",               description="Başka bir proje talebim var",                  emoji="💡", value="diger"),
+        ]
+        super().__init__(
+            placeholder="🗂️ Proje türünü seç...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="ozel_proje_tur_select"
+        )
+ 
+    async def callback(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
+ 
+        guild = interaction.guild
+        user  = interaction.user
+ 
+        labels = {
+            "discord_bot":     ("Discord Botu",      "🤖"),
+            "web_sitesi":      ("Web Sitesi",         "🌐"),
+            "discord_sunucu":  ("Discord Sunucusu",   "🏠"),
+            "grafik":          ("Grafik / Tasarım",   "🎨"),
+            "diger":           ("Diğer",              "💡"),
+        }
+        label, emoji = labels.get(self.values[0], ("Proje", "📁"))
+ 
+        # Açık talep kontrolü
+        if user.id in open_ozel_projeler:
+            existing = guild.get_channel(open_ozel_projeler[user.id])
+            if existing:
+                return await interaction.followup.send(
+                    embed=nova_embed("⚠️ Mevcut Talep",
+                        f"Zaten açık bir özel proje talebin var: {existing.mention}", COLOR_WARNING),
+                    ephemeral=True
+                )
+            else:
+                open_ozel_projeler.pop(user.id, None)
+ 
+        category = guild.get_channel(OZEL_PROJE_CATEGORY_ID)
+ 
+        overwrites = {
+            guild.default_role: nextcord.PermissionOverwrite(view_channel=False),
+            user: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True)
+        }
+ 
+        try:
+            proje_ch = await guild.create_text_channel(
+                name=f"proje-{user.name}",
+                overwrites=overwrites,
+                category=category,
+                topic=f"{emoji} {label} | {user} tarafından açıldı"
+            )
+        except Exception as e:
+            return await interaction.followup.send(
+                embed=nova_embed("❌ Kanal Oluşturulamadı", f"Hata:\n```{e}```", COLOR_ERROR),
+                ephemeral=True
+            )
+ 
+        open_ozel_projeler[user.id] = proje_ch.id
+ 
+        close_view = OzelProjeCloseView()
+        proje_embed = nextcord.Embed(
+            title=f"{emoji} Özel Proje Talebi — {label}",
+            description=(
+                f"Merhaba {user.mention} 👋\n\n"
+                f"**Proje Türü:** {emoji} {label}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"Lütfen projen hakkında aşağıdakileri detaylı yaz:\n\n"
+                f"📌 **Ne istiyorsun?** — Projenin amacını ve özelliklerini anlat\n"
+                f"⏰ **Teslim tarihi?** — Ne zaman teslim edilmesini istiyorsun?\n"
+                f"💰 **Bütçen nedir?** — Ödeme yapmayı düşünüyor musun?\n"
+                f"📎 **Referans var mı?** — Örnek proje/link/görsel varsa paylaş\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Ekibimiz en kısa sürede seninle iletişime geçecek! 🚀"
+            ),
+            color=0xF1C40F
+        )
+        proje_embed.set_footer(text="✦ Project Nova — Özel Proje")
+        await proje_ch.send(content=user.mention, embed=proje_embed, view=close_view)
+ 
+        # Log
+        log_ch = guild.get_channel(TICKET_LOG_CH_ID)
+        if log_ch:
+            log_embed = nextcord.Embed(
+                title="📁  Yeni Özel Proje Talebi",
+                description=(
+                    f"**Kanal:** {proje_ch.mention}\n"
+                    f"**Açan:** {user.mention} (`{user}`)\n"
+                    f"**Proje Türü:** {emoji} {label}"
+                ),
+                color=0xF1C40F
+            )
+            log_embed.set_author(name=str(user), icon_url=user.display_avatar.url)
+            log_embed.set_footer(text="✦ Project Nova — Ticket Log")
+            log_embed.timestamp = nextcord.utils.utcnow()
+            try:
+                await log_ch.send(embed=log_embed)
+            except Exception as e:
+                print(f"Log gönderilemedi: {e}")
+ 
+        await interaction.followup.send(
+            embed=nova_embed("✅ Talep Oluşturuldu",
+                f"Özel proje kanalın hazır: {proje_ch.mention}", COLOR_SUCCESS),
+            ephemeral=True
+        )
+ 
+ 
+class OzelProjeView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(OzelProjeTurSelect())
+ 
+ 
+@bot.slash_command(name="özelproje", description="📁 Özel proje talep panelini gönderir.")
+async def ozel_proje(interaction: Interaction):
+    embed = nextcord.Embed(
+        title="📁  Özel Proje Talebi",
+        description=(
+            "**Merhaba!** 👋\n\n"
+            "Sana özel bir proje yaptırmak mı istiyorsun?\n"
+            "Aşağıdan proje türünü seçerek talebini oluşturabilirsin.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 **Discord Botu** — Özel bot geliştirme\n"
+            "🌐 **Web Sitesi** — Web sitesi / uygulama\n"
+            "🏠 **Discord Sunucusu** — Sunucu kurulum & tasarım\n"
+            "🎨 **Grafik / Tasarım** — Logo, banner, grafik\n"
+            "💡 **Diğer** — Diğer proje talepleri\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📌 Her kullanıcı aynı anda yalnızca **1 talep** açabilir."
+        ),
+        color=0xF1C40F,
+    )
+    embed.set_footer(text="✦ Project Nova — Özel Proje Sistemi")
+    await interaction.channel.send(embed=embed, view=OzelProjeView())
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Panel Gönderildi", "Özel proje paneli başarıyla gönderildi!", COLOR_SUCCESS),
+        ephemeral=True
+    )
+ 
+# ═══════════════════════════════════════════════════════════════
+#       ÖNCELİKLİ DESTEK SİSTEMİ — /öncelikli-destek-kur
+# ═══════════════════════════════════════════════════════════════
+ 
+class OncelikliCloseView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+ 
+    @nextcord.ui.button(label="🔒  Destek Talebini Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_oncelikli_btn")
+    async def close_oncelikli(self, button: nextcord.ui.Button, interaction: Interaction):
+        channel = interaction.channel
+        guild   = interaction.guild
+ 
+        owner_id = None
+        for uid, cid in open_oncelikli.items():
+            if cid == channel.id:
+                owner_id = uid
+                break
+ 
+        log_ch = guild.get_channel(TICKET_LOG_CH_ID)
+        if log_ch:
+            log_embed = nextcord.Embed(
+                title="🔒  Öncelikli Destek Talebi Kapatıldı",
+                description=(
+                    f"**Kanal:** {channel.name}\n"
+                    f"**Kapatan:** {interaction.user.mention} (`{interaction.user}`)\n"
+                    + (f"**Talep Sahibi:** <@{owner_id}>" if owner_id else "")
+                ),
+                color=COLOR_ERROR
+            )
+            log_embed.set_footer(text="✦ Project Nova — Ticket Log")
+            log_embed.timestamp = nextcord.utils.utcnow()
+            try:
+                await log_ch.send(embed=log_embed)
+            except Exception as e:
+                print(f"Log gönderilemedi: {e}")
+ 
+        if owner_id:
+            open_oncelikli.pop(owner_id, None)
+ 
+        await interaction.response.send_message(
+            embed=nova_embed("🔒  Kapatılıyor...", "Kanal 5 saniye içinde silinecek.", COLOR_WARNING)
+        )
+        await asyncio.sleep(5)
+        try:
+            await channel.delete(reason=f"{interaction.user} tarafından kapatıldı.")
+        except Exception as e:
+            print(f"Kanal silinemedi: {e}")
+ 
+ 
+class OncelikliKonuSelect(nextcord.ui.Select):
+    def __init__(self):
+        options = [
+            nextcord.SelectOption(label="Acil Teknik Destek",  description="Acil teknik bir sorunum var",                emoji="🚨", value="acil_teknik"),
+            nextcord.SelectOption(label="Ödeme / Fatura",      description="Ödeme veya fatura ile ilgili sorunum var",   emoji="💳", value="odeme"),
+            nextcord.SelectOption(label="VIP Sipariş",         description="Öncelikli sipariş vermek istiyorum",         emoji="👑", value="vip_siparis"),
+            nextcord.SelectOption(label="Şikayet",             description="Bir şikayet iletmek istiyorum",              emoji="📣", value="sikayet"),
+            nextcord.SelectOption(label="Diğer (Öncelikli)",   description="Acil başka bir konuda yardıma ihtiyacım var",emoji="⚡", value="diger"),
+        ]
+        super().__init__(
+            placeholder="⚡ Destek konusunu seç...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="oncelikli_konu_select"
+        )
+ 
+    async def callback(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
+ 
+        guild = interaction.guild
+        user  = interaction.user
+ 
+        labels = {
+            "acil_teknik":  ("Acil Teknik Destek", "🚨"),
+            "odeme":        ("Ödeme / Fatura",      "💳"),
+            "vip_siparis":  ("VIP Sipariş",         "👑"),
+            "sikayet":      ("Şikayet",             "📣"),
+            "diger":        ("Diğer (Öncelikli)",   "⚡"),
+        }
+        label, emoji = labels.get(self.values[0], ("Öncelikli Destek", "⚡"))
+ 
+        # Açık talep kontrolü
+        if user.id in open_oncelikli:
+            existing = guild.get_channel(open_oncelikli[user.id])
+            if existing:
+                return await interaction.followup.send(
+                    embed=nova_embed("⚠️ Mevcut Talep",
+                        f"Zaten açık bir öncelikli destek talebin var: {existing.mention}", COLOR_WARNING),
+                    ephemeral=True
+                )
+            else:
+                open_oncelikli.pop(user.id, None)
+ 
+        category = guild.get_channel(ONCELIKLI_CATEGORY_ID)
+ 
+        overwrites = {
+            guild.default_role: nextcord.PermissionOverwrite(view_channel=False),
+            user: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True)
+        }
+ 
+        try:
+            destek_ch = await guild.create_text_channel(
+                name=f"öncelikli-{user.name}",
+                overwrites=overwrites,
+                category=category,
+                topic=f"{emoji} {label} | {user} tarafından açıldı"
+            )
+        except Exception as e:
+            return await interaction.followup.send(
+                embed=nova_embed("❌ Kanal Oluşturulamadı", f"Hata:\n```{e}```", COLOR_ERROR),
+                ephemeral=True
+            )
+ 
+        open_oncelikli[user.id] = destek_ch.id
+ 
+        close_view = OncelikliCloseView()
+        destek_embed = nextcord.Embed(
+            title=f"{emoji} Öncelikli Destek — {label}",
+            description=(
+                f"Merhaba {user.mention} 👋\n\n"
+                f"**Konu:** {emoji} {label}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔴 **Öncelikli destek talebin alındı!**\n\n"
+                f"Ekibimiz sana en hızlı şekilde dönüş yapacak.\n"
+                f"Lütfen sorunu/talebini detaylı şekilde açıkla.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ),
+            color=0xFF6B35
+        )
+        destek_embed.set_footer(text="✦ Project Nova — Öncelikli Destek")
+        await destek_ch.send(content=user.mention, embed=destek_embed, view=close_view)
+ 
+        # Log
+        log_ch = guild.get_channel(TICKET_LOG_CH_ID)
+        if log_ch:
+            log_embed = nextcord.Embed(
+                title="⚡  Yeni Öncelikli Destek Talebi",
+                description=(
+                    f"**Kanal:** {destek_ch.mention}\n"
+                    f"**Açan:** {user.mention} (`{user}`)\n"
+                    f"**Konu:** {emoji} {label}"
+                ),
+                color=0xFF6B35
+            )
+            log_embed.set_author(name=str(user), icon_url=user.display_avatar.url)
+            log_embed.set_footer(text="✦ Project Nova — Ticket Log")
+            log_embed.timestamp = nextcord.utils.utcnow()
+            try:
+                await log_ch.send(embed=log_embed)
+            except Exception as e:
+                print(f"Log gönderilemedi: {e}")
+ 
+        await interaction.followup.send(
+            embed=nova_embed("✅ Talep Oluşturuldu",
+                f"Öncelikli destek kanalın hazır: {destek_ch.mention}", COLOR_SUCCESS),
+            ephemeral=True
+        )
+ 
+ 
+class OncelikliView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(OncelikliKonuSelect())
+ 
+ 
+@bot.slash_command(name="öncelikli-destek-kur", description="⚡ Öncelikli destek panelini gönderir. (Admin)")
+async def oncelikli_destek_kur(interaction: Interaction):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+ 
+    embed = nextcord.Embed(
+        title="⚡  Öncelikli Destek Sistemi",
+        description=(
+            "**Öncelikli Destek'e Hoş Geldin!** 🔴\n\n"
+            "Acil veya önemli bir konuda hızlı destek almak için\n"
+            "aşağıdan konunu seçerek talebini oluşturabilirsin.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🚨 **Acil Teknik Destek** — Kritik teknik sorunlar\n"
+            "💳 **Ödeme / Fatura** — Ödeme ve fatura işlemleri\n"
+            "👑 **VIP Sipariş** — Öncelikli sipariş\n"
+            "📣 **Şikayet** — Şikayet iletmek istiyorum\n"
+            "⚡ **Diğer (Öncelikli)** — Diğer acil konular\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "⏱️ Ekibimiz öncelikli taleplere **en hızlı şekilde** dönüş yapar.\n"
+            "📌 Her kullanıcı aynı anda yalnızca **1 talep** açabilir."
+        ),
+        color=0xFF6B35,
+    )
+    embed.set_footer(text="✦ Project Nova — Öncelikli Destek Sistemi")
+    await interaction.channel.send(embed=embed, view=OncelikliView())
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Panel Gönderildi", "Öncelikli destek paneli başarıyla gönderildi!", COLOR_SUCCESS),
+        ephemeral=True
+    )
+ 
+# ═══════════════════════════════════════════════════════════════
 #                        BAŞLAT
 # ═══════════════════════════════════════════════════════════════
  
 bot.run(TOKEN)
- 
