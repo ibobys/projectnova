@@ -557,6 +557,27 @@ async def uyesayisi(interaction: Interaction):
         embed.set_thumbnail(url=guild.icon.url)
     embed.set_footer(text="✦ Project Nova — İstatistik")
     await interaction.response.send_message(embed=embed)
+
+# Oto Rol
+@bot.event
+async def on_member_join(member):
+    total = sum(g.member_count for g in bot.guilds)
+
+    await bot.change_presence(
+        activity=nextcord.Activity(
+            type=nextcord.ActivityType.watching,
+            name=f"{total} Üye ile Büyüyoruz 🚀"
+        )
+    )
+
+    # Oto rol
+    role = member.guild.get_role(1482031140897292563)
+
+    if role:
+        try:
+            await member.add_roles(role, reason="Otomatik kayıt rolü")
+        except Exception as e:
+            print(f"Oto rol verilemedi: {e}")
  
 # ═══════════════════════════════════════════════════════════════
 #                        BAŞLAT
