@@ -15,7 +15,7 @@ from datetime import timedelta
 #                         CONFIG
 # ═══════════════════════════════════════════════════════════════
  
-TOKEN = "BURAYA_BOT_TOKENINI_YAZ"
+TOKEN = os.getenv("TOKEN")
  
 VERIFIED_ROLE_ID     = 1482031063936139264   # Doğrulama rolü (yeşil tik)
 ANNOUNCEMENT_CH_ID   = 1482021925319344409   # /duyuru-paylas hedef kanalı
