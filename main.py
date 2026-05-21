@@ -126,125 +126,117 @@ async def on_message(message):
 class TicketCategorySelect(nextcord.ui.Select):
     def __init__(self):
         options = [
-            nextcord.SelectOption(label="Sipariş",            description="Yeni bir sipariş vermek istiyorum",              emoji="⭐", value="siparis"),
-            nextcord.SelectOption(label="Destek",             description="Bir sorunum var, yardım istiyorum",              emoji="💫", value="destek"),
-            nextcord.SelectOption(label="Proje İsteği",       description="Özel proje talebi oluşturmak istiyorum",        emoji="🌟", value="proje_istegi"),
-            nextcord.SelectOption(label="Ücretsiz Proje Alma",description="Ücretsiz proje hakkında bilgi almak istiyorum", emoji="✨", value="ucretsiz_proje"),
-            nextcord.SelectOption(label="Diğer",              description="Diğer konular hakkında",                        emoji="💠", value="diger"),
+            nextcord.SelectOption(label="Sipariş", description="Yeni bir sipariş vermek istiyorum", emoji="⭐", value="siparis"),
+            nextcord.SelectOption(label="Destek", description="Bir sorunum var, yardım istiyorum", emoji="💫", value="destek"),
+            nextcord.SelectOption(label="Proje İsteği", description="Özel proje talebi oluşturmak istiyorum", emoji="🌟", value="proje_istegi"),
+            nextcord.SelectOption(label="Ücretsiz Proje Alma", description="Ücretsiz proje hakkında bilgi almak istiyorum", emoji="✨", value="ucretsiz_proje"),
+            nextcord.SelectOption(label="Diğer", description="Diğer konular hakkında", emoji="💠", value="diger"),
         ]
-        super().__init__(placeholder="📂  Bir kategori seç...", min_values=1, max_values=1,
-                         options=options, custom_id="ticket_category_select")
- 
+
+        super().__init__(
+            placeholder="📂 Bir kategori seç...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="ticket_category_select"
+        )
+
     async def callback(self, interaction: Interaction):
-        guild  = interaction.guild
-        user   = interaction.user
+        await interaction.response.defer(ephemeral=True)
+
+        guild = interaction.guild
+        user = interaction.user
+
         choice = self.values[0]
+
         labels = {
-            "siparis":        ("Sipariş",              "⭐"),
-            "destek":         ("Destek",               "💫"),
-            "proje_istegi":   ("Proje İsteği",         "🌟"),
-            "ucretsiz_proje": ("Ücretsiz Proje Alma",  "✨"),
-            "diger":          ("Diğer",                "💠"),
+            "siparis": ("Sipariş", "⭐"),
+            "destek": ("Destek", "💫"),
+            "proje_istegi": ("Proje İsteği", "🌟"),
+            "ucretsiz_proje": ("Ücretsiz Proje Alma", "✨"),
+            "diger": ("Diğer", "💠"),
         }
+
         label, emoji = labels.get(choice, ("Ticket", "🎫"))
- 
+
         if user.id in open_tickets:
             existing = guild.get_channel(open_tickets[user.id])
+
             if existing:
-                await interaction.response.send_message(
-                    embed=nova_embed("⚠️  Mevcut Ticket",
-                        f"Zaten açık bir ticket'ın var: {existing.mention}\nÖnce mevcut ticket'ını kapat.",
-                        COLOR_WARNING), ephemeral=True)
-                return
- 
+                return await interaction.followup.send(
+                    embed=nova_embed(
+                        "⚠️ Mevcut Ticket",
+                        f"Zaten açık bir ticket'ın var: {existing.mention}",
+                        COLOR_WARNING
+                    ),
+                    ephemeral=True
+                )
+
         overwrites = {
             guild.default_role: nextcord.PermissionOverwrite(view_channel=False),
-            user: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: nextcord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
-        }
-        ticket_ch = await guild.create_text_channel(
-            name=f"ticket-{user.name}",
-            overwrites=overwrites,
-            topic=f"{emoji} {label} | {user} tarafından açıldı",
-        )
-        open_tickets[user.id] = ticket_ch.id
- 
-        close_view = CloseTicketView()
-        ticket_embed = nextcord.Embed(
-            title=f"{emoji}  {label} — Ticket Açıldı",
-            description=(
-                f"Merhaba {user.mention}! 👋\n\n"
-                f"**Kategori:** {emoji} {label}\n\n"
-                f"**📋 Talebini detaylıca açıklaman yeterli**, ekibimiz en kısa sürede sana yardımcı olacak.\n\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🕒 Ortalama yanıt süresi: **5–30 dakika**\n"
-                f"📌 Lütfen konu dışı mesaj atmaktan kaçının.\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"Ticket'ı kapatmak için aşağıdaki butona basın."
+
+            user: nextcord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True
             ),
-            color=COLOR_TICKET,
-        )
-        ticket_embed.set_footer(text="✦ Project Nova — Destek Merkezi")
-        await ticket_ch.send(embed=ticket_embed, view=close_view)
-        await interaction.response.send_message(
-            embed=nova_embed("✅  Ticket Oluşturuldu",
-                f"Ticket kanalın hazır: {ticket_ch.mention}\nBir yetkili en kısa sürede ilgilenecek!",
-                COLOR_SUCCESS), ephemeral=True)
- 
- 
-class CloseTicketView(nextcord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
- 
-    @nextcord.ui.button(label="🔒  Ticket'ı Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_ticket_btn")
-    async def close_ticket(self, button, interaction: Interaction):
-        channel  = interaction.channel
-        owner_id = next((uid for uid, cid in open_tickets.items() if cid == channel.id), None)
-        if owner_id:
-            open_tickets.pop(owner_id, None)
-        await channel.send(embed=nova_embed("🔒  Ticket Kapatıldı",
-            f"Bu ticket {interaction.user.mention} tarafından kapatıldı.\nKanal **5 saniye** içinde silinecek.",
-            COLOR_ERROR))
-        await asyncio.sleep(5)
+
+            guild.me: nextcord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                manage_channels=True,
+                manage_messages=True
+            )
+        }
+
         try:
-            await channel.delete(reason="Ticket kapatıldı")
-        except Exception:
-            pass
- 
- 
-class TicketPanelView(nextcord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(TicketCategorySelect())
- 
- 
-@bot.slash_command(name="ticket-kur", description="🎫 Destek Merkezi panelini gönderir. (Admin)")
-async def ticket_kur(interaction: Interaction):
-    if not await is_admin(interaction):
-        return await interaction.response.send_message(
-            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
-    embed = nextcord.Embed(
-        title="🎫  Destek Merkezi",
-        description=(
-            "**💜  Destek Merkezi Hakkında.**\n"
-            "Aşağıdaki seçeneklerden uygun olanı seçerek hemen bir ticket oluşturabilirsiniz.\n\n"
-            "**📌  Sunucu Bilgisi.**\n"
-            "Gereksiz ticket açmayın, Sunucu Kurallarını Okumayı Unutmayın.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⭐  **Sipariş** — Yeni bir sipariş vermek istiyorum\n"
-            "💫  **Destek** — Bir sorunum var, yardım istiyorum\n"
-            "🌟  **Proje İsteği** — Özel proje talebi oluşturmak istiyorum\n"
-            "✨  **Ücretsiz Proje Alma** — Ücretsiz proje hakkında bilgi almak istiyorum\n"
-            "💠  **Diğer** — Diğer konular hakkında\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        ),
-        color=COLOR_TICKET,
-    )
-    embed.set_footer(text="✦ Project Nova — Destek Merkezi")
-    await interaction.channel.send(embed=embed, view=TicketPanelView())
-    await interaction.response.send_message(
-        embed=nova_embed("✅ Panel Gönderildi", "Ticket paneli başarıyla gönderildi!", COLOR_SUCCESS), ephemeral=True)
- 
+            ticket_ch = await guild.create_text_channel(
+                name=f"ticket-{user.name}",
+                overwrites=overwrites,
+                topic=f"{emoji} {label} | {user} tarafından açıldı"
+            )
+
+        except Exception as e:
+            return await interaction.followup.send(
+                embed=nova_embed(
+                    "❌ Ticket Oluşturulamadı",
+                    f"Hata:\n```{e}```",
+                    COLOR_ERROR
+                ),
+                ephemeral=True
+            )
+
+        open_tickets[user.id] = ticket_ch.id
+
+        close_view = CloseTicketView()
+
+        ticket_embed = nextcord.Embed(
+            title=f"{emoji} {label} — Ticket Açıldı",
+            description=(
+                f"Merhaba {user.mention} 👋\n\n"
+                f"**Kategori:** {emoji} {label}\n\n"
+                f"Talebini detaylı şekilde yazabilirsin.\n"
+                f"Yetkililer en kısa sürede ilgilenecek."
+            ),
+            color=COLOR_TICKET
+        )
+
+        ticket_embed.set_footer(text="✦ Project Nova")
+
+        await ticket_ch.send(
+            content=user.mention,
+            embed=ticket_embed,
+            view=close_view
+        )
+
+        await interaction.followup.send(
+            embed=nova_embed(
+                "✅ Ticket Oluşturuldu",
+                f"Ticket kanalın hazır: {ticket_ch.mention}",
+                COLOR_SUCCESS
+            ),
+            ephemeral=True
+        )
 # ═══════════════════════════════════════════════════════════════
 #            DOĞRULAMA — /dogrulama
 # ═══════════════════════════════════════════════════════════════
