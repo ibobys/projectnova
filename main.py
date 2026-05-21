@@ -20,9 +20,9 @@ from discord import option
 # ══════════════════════════════════════════════════════════════════
 #  CONFIG — Railway Variables'tan otomatik okunur
 # ══════════════════════════════════════════════════════════════════
-TOKEN     = os.environ["BOT_TOKEN"]
-CLIENT_ID = int(os.environ["CLIENT_ID"])
-GUILD_ID  = int(os.environ["GUILD_ID"])
+TOKEN = os.getenv("TOKEN")
+CLIENT_ID = int(os.getenv("CLIENT_ID"))
+GUILD_ID = int(os.getenv("GUILD_ID"))
 
 VERIFIED_ROLE_ID      = 1482031063936139264   # Doğrulama rolü
 ANNOUNCEMENT_CH_ID    = 1482021925319344409   # Duyuru kanalı
