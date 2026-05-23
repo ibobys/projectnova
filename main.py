@@ -5,20 +5,21 @@ from nextcord import Interaction, SlashOption
 import asyncio
 import re
 from datetime import timedelta
+from collections import defaultdict
 
 TOKEN = os.getenv("TOKEN")
 
 # ── ID'ler ─────────────────────────────────────────────────────
-VERIFIED_ROLE_ID       = 1482031063936139264   # Doğrulama rolü
-AUTO_ROLE_ID           = 1482031140897292563   # Otomatik kayıt rolü
-ANNOUNCEMENT_CH_ID     = 1482021925319344409   # /duyuru-paylas hedef kanalı
-PARTNER_CH_ID          = 1482021699020132486   # /partner-basvuru sadece bu kanal
-REQUEST_CH_ID          = 1482034060678140015   # /istekleriniz sadece bu kanal
-EMBED_RELAY_CH_ID      = 1483112387199504474   # Yazılanlar embed'e dönüşür
-TICKET_LOG_CH_ID       = 1506945404569255967   # Ticket log kanalı
-TICKET_CATEGORY_ID     = 1506935742847254568   # Normal ticket kategorisi
-OZEL_PROJE_CATEGORY_ID = 1506947665940709376   # Özel proje kategorisi
-ONCELIKLI_CATEGORY_ID  = 1506948002525352066   # Öncelikli destek kategorisi
+VERIFIED_ROLE_ID       = 1482031063936139264
+AUTO_ROLE_ID           = 1482031140897292563
+ANNOUNCEMENT_CH_ID     = 1482021925319344409
+PARTNER_CH_ID          = 1482021699020132486
+REQUEST_CH_ID          = 1482034060678140015
+EMBED_RELAY_CH_ID      = 1483112387199504474
+TICKET_LOG_CH_ID       = 1506945404569255967
+TICKET_CATEGORY_ID     = 1506935742847254568
+OZEL_PROJE_CATEGORY_ID = 1506947665940709376
+ONCELIKLI_CATEGORY_ID  = 1506948002525352066
 
 # ── Renkler ────────────────────────────────────────────────────
 COLOR_PRIMARY  = 0x7B2FBE
@@ -28,8 +29,106 @@ COLOR_WARNING  = 0xF39C12
 COLOR_INFO     = 0x3498DB
 COLOR_TICKET   = 0x5865F2
 
-# ── Küfür listesi ──────────────────────────────────────────────
-BANNED_WORDS = ["küfür1", "küfür2", "küfür3"]
+# ═══════════════════════════════════════════════════════════════
+#          GELİŞMİŞ KÜFÜR / YASAK KELİME LİSTESİ
+#  Türkçe küfürler · dini hakaretler · milliyetçilik karşıtı
+#  ırkçı ifadeler · cinsel içerik · nefret söylemi
+# ═══════════════════════════════════════════════════════════════
+
+BANNED_WORDS = [
+    # ── Türkçe Küfür (doğrudan & varyant) ──────────────────────
+    "amk", "amına", "amını", "amın", "bok", "boktan", "boklu",
+    "oç", "orospu", "orospuçocuğu", "orospunun", "piç", "piçlik",
+    "göt", "götü", "götveren", "sik", "sikin", "sikik", "sikiş",
+    "sikeyim", "siktir", "siktirin", "sikerim", "siktirgit",
+    "yarrak", "yarrağı", "yarak", "yaraklar", "çük",
+    "ibne", "ibnelik", "oğlan", "pezeveng", "pezevenk",
+    "kahpe", "kahpeler", "kaltak", "şerefsiz", "şerefsizlik",
+    "haysiyetsiz", "namussuz", "namussuzu", "gerizekalı",
+    "geri zekalı", "salak", "aptal", "mal", "dangalak",
+    "sürtük", "fahişe", "bitch", "whore", "fuck", "fucker",
+    "fucking", "shit", "asshole", "pussy", "dick", "cock",
+    "bastard", "motherfucker", "cunt", "nigga", "nigger",
+
+    # ── Dini Hakaretler ─────────────────────────────────────────
+    "allaha küfür", "allaha sövme", "dinsiz", "imansız",
+    "gavur", "kâfir",          # hakaret amacıyla kullanım
+    "piç kurusu", "it oğlu it",
+    "peygambere hakaret", "kurana hakaret", "islama hakaret",
+    "tanrıya küfür", "dine sövme", "allah'a söveyim",
+    "mevlüte küfür", "camiye küfür", "allah", "kitab", "kitapını"
+
+    # ── Milliyetçilik Karşıtı / Irkçı ───────────────────────────
+    "türk değil", "türkler hayvan", "türkler it",
+    "kürtler hayvan", "ermeniler it", "yunanlar domuz",
+    "arap pisi", "zenci", "çingene",   # aşağılayıcı bağlamda
+    "atatürke hakaret", "atatürk it", "atatürk domuz",
+    "bayrak yakıyorum", "türk bayrağı", # olumsuz bağlamda algı
+    "vatan hain", "vatansız",
+
+    # ── Nefret Söylemi ──────────────────────────────────────────
+    "eşcinsel", "ibne",        # hakaret bağlamında
+    "trans it", "gay pis",
+    "hate speech", "kill yourself", "kys",
+    "ölüm dilek", "ölmesini istiyorum",
+    "kendini öldür", "intihar et",
+
+    # ── Yaygın Harf Değiştirme Varyantları ──────────────────────
+    "s1ktir", "s!ktir", "s.iktir",
+    "a.mına", "a_mına", "a-mına",
+    "or0spu", "0rospu",
+    "f.uck", "f*ck", "sh!t", "b!tch",
+]
+
+# ═══════════════════════════════════════════════════════════════
+#          GELİŞMİŞ URL / REKLAM ENGELLEYİCİ
+# ═══════════════════════════════════════════════════════════════
+
+# İzin verilen domain'ler (sunucunun kendi linkleri)
+ALLOWED_DOMAINS = [
+    "discord.gg",
+    "discord.com",
+    "discordapp.com",
+    "projectnova.com.tr",
+    "youtube.com",
+    "youtu.be",
+    "github.com",
+    "imgur.com",
+    "tenor.com",
+    "giphy.com",
+    "twitch.tv",
+]
+
+# Kesin yasaklı domain / pattern'ler (reklam/dolandırıcılık)
+BLOCKED_DOMAINS = [
+    # Discord nitro dolandırıcılığı
+    "discordnitro", "discord-nitro", "discord.gift",
+    "discordgift", "nitro-free", "free-nitro",
+    # Genel kısaltıcılar (spam amaçlı)
+    "bit.ly", "tinyurl", "t.co", "ow.ly", "rb.gy",
+    "cutt.ly", "shorturl", "tiny.cc", "is.gd", "buff.ly",
+    # Kripto / sahte yatırım
+    "crypto-free", "bitcoin-free", "btc-free",
+    "coinbase-bonus", "binance-bonus", "pump-group",
+    # Sahte çekilişler
+    "free-robux", "freerobux", "robux-hack",
+    "free-vbucks", "vbucks-hack", "freevbucks",
+    # Phishing / şüpheli
+    "steamcommunity.ru", "steam-trade", "steamskins",
+    "csgo-skin", "skin-free",
+    # Rakip Discord sunucu reklamları (genel pattern)
+    # — discord.gg dışı invite benzeri bağlantılar —
+]
+
+# URL tespiti için regex
+URL_REGEX = re.compile(
+    r"(https?://[^\s<>\"]+|www\.[^\s<>\"]+|[a-zA-Z0-9\-]+\.(com|net|org|gg|io|tv|ru|xyz|tk|ml|ga|cf|gq|tr|co)[^\s]*)",
+    re.IGNORECASE
+)
+
+# ── Uyarı sayacı (kullanıcı başına) ───────────────────────────
+warn_count:     dict = defaultdict(int)   # user_id -> uyarı sayısı
+mute_threshold: int  = 3                  # kaç uyarıda mute
 
 # ── Açık ticket takibi ─────────────────────────────────────────
 open_tickets:       dict = {}
@@ -37,7 +136,7 @@ open_ozel_projeler: dict = {}
 open_oncelikli:     dict = {}
 
 # ── Invite takibi ──────────────────────────────────────────────
-invite_cache: dict = {}  # guild_id -> {invite_code: uses}
+invite_cache: dict = {}
 
 # ═══════════════════════════════════════════════════════════════
 #                     BOT KURULUMU
@@ -58,12 +157,68 @@ def nova_embed(title, description="", color=COLOR_PRIMARY):
     e.set_footer(text="✦ Project Nova")
     return e
 
-def contains_banned_word(text):
-    lowered = text.lower()
+def normalize_text(text: str) -> str:
+    """Harf değiştirme saldırılarını normalize et."""
+    replacements = {
+        "0": "o", "1": "i", "3": "e", "4": "a", "5": "s",
+        "@": "a", "$": "s", "!": "i", "+": "t", "€": "e",
+        "ı": "i", "ğ": "g", "ü": "u", "ş": "s", "ö": "o", "ç": "c",
+    }
+    result = text.lower()
+    for k, v in replacements.items():
+        result = result.replace(k, v)
+    # boşlukları ve noktalamayı sıkıştır
+    result = re.sub(r"[\s\.\-_\*]+", "", result)
+    return result
+
+def contains_banned_word(text: str) -> tuple[bool, str]:
+    """Yasaklı kelime tespiti. (tespit_edildi, hangi_kelime)"""
+    normalized = normalize_text(text)
+    lowered    = text.lower()
     for word in BANNED_WORDS:
+        clean_word = normalize_text(word)
+        # Normalize edilmiş metinde ara
+        if clean_word in normalized:
+            return True, word
+        # Orijinal metinde kelime sınırıyla ara
         if re.search(rf"\b{re.escape(word.lower())}\b", lowered):
-            return True
-    return False
+            return True, word
+    return False, ""
+
+def check_url(text: str) -> tuple[bool, str]:
+    """
+    URL kontrolü:
+    - Eğer izin verilmemiş domain ise True (engelle) döner
+    - Açıkça yasaklı pattern içeriyorsa True döner
+    """
+    urls = URL_REGEX.findall(text)
+    if not urls:
+        return False, ""
+
+    for url_match in urls:
+        url = url_match[0] if isinstance(url_match, tuple) else url_match
+        url_lower = url.lower()
+
+        # Önce yasaklı pattern kontrol
+        for blocked in BLOCKED_DOMAINS:
+            if blocked in url_lower:
+                return True, url
+
+        # İzin verilen domain mi?
+        allowed = False
+        for domain in ALLOWED_DOMAINS:
+            if domain in url_lower:
+                allowed = True
+                break
+
+        if not allowed:
+            # Discord.gg olmayan invite benzeri link mi?
+            if re.search(r"discord\.gg/[a-zA-Z0-9]+", url_lower):
+                # discord.gg zaten ALLOWED_DOMAINS'de, ama başka bir şey mi?
+                pass
+            return True, url
+
+    return False, ""
 
 async def is_admin(interaction):
     return interaction.user.guild_permissions.administrator
@@ -79,8 +234,7 @@ async def check_channel(interaction, allowed_id):
         return False
     return True
 
-async def get_inviter(guild: nextcord.Guild) -> nextcord.Member | None:
-    """Yeni gelen üyeyi davet eden kişiyi bul."""
+async def get_inviter(guild: nextcord.Guild):
     try:
         current_invites = await guild.invites()
         cached = invite_cache.get(guild.id, {})
@@ -90,11 +244,76 @@ async def get_inviter(guild: nextcord.Guild) -> nextcord.Member | None:
             if invite.uses > old_uses:
                 inviter = invite.inviter
                 break
-        # Cache güncelle
         invite_cache[guild.id] = {inv.code: inv.uses for inv in current_invites}
         return inviter
     except Exception:
         return None
+
+async def apply_warn(message: nextcord.Message, reason: str, detail: str = ""):
+    """Uyarı ver, eşikte mute uygula, log gönder."""
+    user    = message.author
+    guild   = message.guild
+    warn_count[user.id] += 1
+    count   = warn_count[user.id]
+
+    # Log kanalına bildir
+    log_ch = guild.get_channel(TICKET_LOG_CH_ID)
+    if log_ch:
+        log_embed = nextcord.Embed(
+            title="🚨  Moderasyon Kaydı",
+            description=(
+                f"**Kullanıcı:** {user.mention} (`{user}`)\n"
+                f"**Sebep:** {reason}\n"
+                f"**Detay:** `{detail[:100]}`\n"
+                f"**Toplam Uyarı:** `{count}/{mute_threshold}`\n"
+                f"**Kanal:** {message.channel.mention}"
+            ),
+            color=COLOR_ERROR
+        )
+        log_embed.set_thumbnail(url=user.display_avatar.url)
+        log_embed.set_footer(text="✦ Project Nova — Oto-Moderasyon")
+        log_embed.timestamp = nextcord.utils.utcnow()
+        try:
+            await log_ch.send(embed=log_embed)
+        except Exception:
+            pass
+
+    if count >= mute_threshold:
+        # 10 dakika mute
+        try:
+            await user.edit(
+                timeout=nextcord.utils.utcnow() + timedelta(minutes=10),
+                reason=f"Oto-mod: {count} uyarı ({reason})"
+            )
+            warn_count[user.id] = 0
+            warn_embed = nova_embed(
+                "🔇  Otomatik Susturma",
+                f"{user.mention} **{mute_threshold} uyarı** aldığı için **10 dakika** susturuldu.\n"
+                f"**Son sebep:** {reason}",
+                COLOR_ERROR
+            )
+            warn_msg = await message.channel.send(embed=warn_embed)
+            await asyncio.sleep(8)
+            try:
+                await warn_msg.delete()
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"Mute hatası: {e}")
+    else:
+        remaining = mute_threshold - count
+        warn_embed = nova_embed(
+            "⚠️  Uyarı",
+            f"{user.mention} **{reason}** nedeniyle uyarıldı.\n"
+            f"📌 {remaining} uyarı daha → **otomatik susturma**",
+            COLOR_WARNING
+        )
+        warn_msg = await message.channel.send(embed=warn_embed)
+        await asyncio.sleep(6)
+        try:
+            await warn_msg.delete()
+        except Exception:
+            pass
 
 # ═══════════════════════════════════════════════════════════════
 #                         OLAYLAR
@@ -107,8 +326,6 @@ async def on_ready():
     await bot.change_presence(
         activity=nextcord.Activity(type=nextcord.ActivityType.watching,
             name=f"{total} Üye ile Büyüyoruz 🚀"))
-
-    # İlk açılışta tüm sunucuların invite cache'ini doldur
     for guild in bot.guilds:
         try:
             invites = await guild.invites()
@@ -118,7 +335,6 @@ async def on_ready():
 
 @bot.event
 async def on_invite_create(invite: nextcord.Invite):
-    """Yeni invite oluşturulunca cache güncelle."""
     if invite.guild:
         cached = invite_cache.get(invite.guild.id, {})
         cached[invite.code] = invite.uses
@@ -126,7 +342,6 @@ async def on_invite_create(invite: nextcord.Invite):
 
 @bot.event
 async def on_invite_delete(invite: nextcord.Invite):
-    """Invite silinince cache'den kaldır."""
     if invite.guild:
         cached = invite_cache.get(invite.guild.id, {})
         cached.pop(invite.code, None)
@@ -136,13 +351,11 @@ async def on_invite_delete(invite: nextcord.Invite):
 async def on_member_join(member: nextcord.Member):
     guild = member.guild
 
-    # Üye sayısı güncelle
     total = sum(g.member_count for g in bot.guilds)
     await bot.change_presence(
         activity=nextcord.Activity(type=nextcord.ActivityType.watching,
             name=f"{total} Üye ile Büyüyoruz 🚀"))
 
-    # Otomatik kayıt rolü
     role = guild.get_role(AUTO_ROLE_ID)
     if role:
         try:
@@ -150,25 +363,24 @@ async def on_member_join(member: nextcord.Member):
         except Exception as e:
             print(f"Oto rol verilemedi: {e}")
 
-    # Davet eden kişiyi bul
     inviter = await get_inviter(guild)
     inviter_text = f"{inviter.mention} (`{inviter}`)" if inviter else "Bilinmiyor"
 
-    # ── Yeni üyeye DM (görsel 1 formatı) ─────────────────────
+    # ── Yeni üyeye DM ─────────────────────────────────────────
     join_view = nextcord.ui.View(timeout=None)
-    btn_sunucu = nextcord.ui.Button(
+    btn_siparis = nextcord.ui.Button(
         label="Sipariş Oluştur",
         style=nextcord.ButtonStyle.link,
-        url="https://discord.gg/projectnova",
+        url="https://discord.gg/gjtJv7mduX",
         emoji="🛒"
     )
     btn_website = nextcord.ui.Button(
         label="Web Sitemiz",
         style=nextcord.ButtonStyle.link,
-        url="https://ibobys.dev",
+        url="https://projectnova.com.tr",
         emoji="🌐"
     )
-    join_view.add_item(btn_sunucu)
+    join_view.add_item(btn_siparis)
     join_view.add_item(btn_website)
 
     join_embed = nextcord.Embed(
@@ -179,7 +391,7 @@ async def on_member_join(member: nextcord.Member):
             f"⚙️  FiveM & Minecraft yazılım çözümleri\n"
             f"🌐  Web sitesi tasarım ve geliştirme\n"
             f"🤖  Özel Discord bot geliştirme\n"
-            f"⭐  8+ yıl tecrübe · 150+ sunucu · 2.000+ sipariş\n"
+            f"⭐  1+ yıl tecrübe · 150+ sunucu · 2.000+ sipariş\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
         color=COLOR_PRIMARY
@@ -225,9 +437,12 @@ async def on_member_remove(member):
             name=f"{total} Üye ile Büyüyoruz 🚀"))
 
 @bot.event
-async def on_message(message):
+async def on_message(message: nextcord.Message):
     if message.author.bot:
         return
+
+    # Admin mesajlarını moderasyondan muaf tut
+    is_mod = message.author.guild_permissions.administrator if message.guild else False
 
     # ── Embed Relay Kanalı ──────────────────────────────────────
     if message.channel.id == EMBED_RELAY_CH_ID:
@@ -245,8 +460,7 @@ async def on_message(message):
                 name=message.author.display_name,
                 icon_url=message.author.display_avatar.url
             )
-            relay_embed.set_footer(text="✦ ibobys.dev")
-
+            relay_embed.set_footer(text="✦ projectnova.com.tr")
             view = nextcord.ui.View(timeout=None)
             thanks_btn = nextcord.ui.Button(
                 label="· Teşekkürler",
@@ -261,23 +475,51 @@ async def on_message(message):
             view.add_item(thanks_btn)
             await message.channel.send(embed=relay_embed, view=view)
         return
-    # ────────────────────────────────────────────────────────────
 
-    if contains_banned_word(message.content):
-        try:
-            await message.delete()
-        except Exception:
-            pass
-        warn = await message.channel.send(
-            embed=nova_embed("🚫  Uygunsuz İçerik",
-                f"{message.author.mention}, uygunsuz kelime kullanımı nedeniyle "
-                f"mesajın silindi. Lütfen sunucu kurallarına uy!\n\n"
-                f"Tekrar eden ihlaller ceza ile sonuçlanacaktır.", COLOR_ERROR))
-        await asyncio.sleep(5)
-        try:
-            await warn.delete()
-        except Exception:
-            pass
+    if not is_mod:
+        full_text = message.content
+
+        # ── 1. KÜFÜR / YASAKLI KELİME KONTROLÜ ────────────────
+        found, word = contains_banned_word(full_text)
+        if found:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await apply_warn(message, "Uygunsuz / yasaklı ifade kullanımı", word)
+            return
+
+        # ── 2. URL / REKLAM ENGELLEYİCİ ───────────────────────
+        blocked_url, blocked_url_value = check_url(full_text)
+        if blocked_url:
+            try:
+                await message.delete()
+            except Exception:
+                pass
+            await apply_warn(message, "İzinsiz URL / reklam paylaşımı", blocked_url_value)
+            return
+
+        # ── 3. DISCORD DAVET LİNKİ KONTROLÜ ───────────────────
+        # discord.gg linkleri sadece ALLOWED_DOMAINS'e göre check_url'de zaten geçiyor
+        # Ek olarak: başka sunucu invite linklerini yakala
+        invite_pattern = re.compile(
+            r"(discord\.gg/|discord\.com/invite/|dsc\.gg/|dsc\.io/)[a-zA-Z0-9]+",
+            re.IGNORECASE
+        )
+        inv_match = invite_pattern.search(full_text)
+        if inv_match:
+            # Kendi sunucu linki değil mi?
+            matched = inv_match.group(0).lower()
+            own_codes = ["gjtJv7mduX", "projectnova"]  # kendi davet kodlarını buraya ekle
+            is_own = any(code in matched for code in own_codes)
+            if not is_own:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                await apply_warn(message, "Başka sunucu reklamı / davet linki", inv_match.group(0))
+                return
+
     await bot.process_commands(message)
 
 # ═══════════════════════════════════════════════════════════════
@@ -293,8 +535,7 @@ class VerifyView(nextcord.ui.View):
         role = interaction.guild.get_role(VERIFIED_ROLE_ID)
         if role is None:
             return await interaction.response.send_message(
-                embed=nova_embed("⚠️  Hata", "Doğrulama rolü bulunamadı.", COLOR_WARNING),
-                ephemeral=True)
+                embed=nova_embed("⚠️  Hata", "Doğrulama rolü bulunamadı.", COLOR_WARNING), ephemeral=True)
         if role in interaction.user.roles:
             return await interaction.response.send_message(
                 embed=nova_embed("ℹ️  Zaten Doğrulandın", "Zaten doğrulanmışsın! Sunucunun tadını çıkar 🎉", COLOR_INFO),
@@ -302,14 +543,13 @@ class VerifyView(nextcord.ui.View):
 
         await interaction.user.add_roles(role, reason="Doğrulama butonu")
 
-        # ── Doğrulama DM embed'i (görsel 2 formatı) ───────────
         verify_view = nextcord.ui.View(timeout=None)
         btn_sunucu = nextcord.ui.Button(
             label="Sunucuya Git", style=nextcord.ButtonStyle.link,
-            url="https://discord.gg/projectnova", emoji="🚀")
+            url="https://discord.gg/gjtJv7mduX", emoji="🚀")
         btn_web = nextcord.ui.Button(
             label="Web Sitemiz", style=nextcord.ButtonStyle.link,
-            url="https://ibobys.dev", emoji="🌐")
+            url="https://projectnova.com.tr", emoji="🌐")
         verify_view.add_item(btn_sunucu)
         verify_view.add_item(btn_web)
 
@@ -374,8 +614,8 @@ class CloseTicketView(nextcord.ui.View):
 
     @nextcord.ui.button(label="🔒  Ticket'ı Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_ticket_btn")
     async def close_ticket(self, button: nextcord.ui.Button, interaction: Interaction):
-        channel = interaction.channel
-        guild   = interaction.guild
+        channel  = interaction.channel
+        guild    = interaction.guild
         owner_id = None
         for uid, cid in open_tickets.items():
             if cid == channel.id:
@@ -527,8 +767,8 @@ class OzelProjeCloseView(nextcord.ui.View):
 
     @nextcord.ui.button(label="🔒  Talebi Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_ozel_proje_btn")
     async def close_ozel_proje(self, button: nextcord.ui.Button, interaction: Interaction):
-        channel = interaction.channel
-        guild   = interaction.guild
+        channel  = interaction.channel
+        guild    = interaction.guild
         owner_id = None
         for uid, cid in open_ozel_projeler.items():
             if cid == channel.id:
@@ -683,8 +923,8 @@ class OncelikliCloseView(nextcord.ui.View):
 
     @nextcord.ui.button(label="🔒  Destek Talebini Kapat", style=nextcord.ButtonStyle.danger, custom_id="close_oncelikli_btn")
     async def close_oncelikli(self, button: nextcord.ui.Button, interaction: Interaction):
-        channel = interaction.channel
-        guild   = interaction.guild
+        channel  = interaction.channel
+        guild    = interaction.guild
         owner_id = None
         for uid, cid in open_oncelikli.items():
             if cid == channel.id:
@@ -862,24 +1102,16 @@ async def toplu_dm_mesaj(interaction: Interaction,
     if not await is_admin(interaction):
         return await interaction.response.send_message(
             embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
-
     await interaction.response.send_message(
         embed=nova_embed("📨 Gönderiliyor...", "Tüm üyelere DM gönderiliyor, bu biraz sürebilir...", COLOR_INFO),
         ephemeral=True)
-
-    guild       = interaction.guild
-    basarili    = 0
-    basarisiz   = 0
-
-    dm_embed = nextcord.Embed(
-        title=f"📢  {baslik}",
-        description=mesaj,
-        color=COLOR_PRIMARY
-    )
+    guild = interaction.guild
+    basarili  = 0
+    basarisiz = 0
+    dm_embed = nextcord.Embed(title=f"📢  {baslik}", description=mesaj, color=COLOR_PRIMARY)
     dm_embed.set_author(name="Project Nova", icon_url=guild.icon.url if guild.icon else None)
     dm_embed.set_footer(text="✦ Project Nova")
     dm_embed.timestamp = nextcord.utils.utcnow()
-
     for member in guild.members:
         if member.bot:
             continue
@@ -889,7 +1121,6 @@ async def toplu_dm_mesaj(interaction: Interaction,
             await asyncio.sleep(0.5)
         except Exception:
             basarisiz += 1
-
     result_embed = nextcord.Embed(
         title="📨  Toplu DM Tamamlandı",
         description=(
@@ -900,18 +1131,16 @@ async def toplu_dm_mesaj(interaction: Interaction,
             f"👥  **Toplam:** `{basarili + basarisiz}` kişi\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
-        color=COLOR_SUCCESS
-    )
+        color=COLOR_SUCCESS)
     result_embed.set_footer(text="✦ Project Nova — Toplu DM")
     result_embed.timestamp = nextcord.utils.utcnow()
-
     try:
         await interaction.user.send(embed=result_embed)
     except Exception:
         pass
 
 # ═══════════════════════════════════════════════════════════════
-#            DM MESAJ — /dmmesaj  ← YENİ KOMUT
+#            DM MESAJ — /dmmesaj
 # ═══════════════════════════════════════════════════════════════
 
 @bot.slash_command(name="dmmesaj", description="📩 Tüm sunucu üyelerine özel DM mesajı gönderir. (Admin)")
@@ -920,26 +1149,17 @@ async def dmmesaj(interaction: Interaction,
     if not await is_admin(interaction):
         return await interaction.response.send_message(
             embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
-
     await interaction.response.send_message(
-        embed=nova_embed("📩 Gönderiliyor...", "Mesajınız tüm üyelere iletiliyor...", COLOR_INFO),
-        ephemeral=True)
-
+        embed=nova_embed("📩 Gönderiliyor...", "Mesajınız tüm üyelere iletiliyor...", COLOR_INFO), ephemeral=True)
     guild     = interaction.guild
     basarili  = 0
     basarisiz = 0
-
-    dm_embed = nextcord.Embed(
-        description=mesaj,
-        color=COLOR_PRIMARY
-    )
+    dm_embed = nextcord.Embed(description=mesaj, color=COLOR_PRIMARY)
     dm_embed.set_author(
         name=f"{interaction.user.display_name} • Project Nova",
-        icon_url=interaction.user.display_avatar.url
-    )
+        icon_url=interaction.user.display_avatar.url)
     dm_embed.set_footer(text="✦ Project Nova")
     dm_embed.timestamp = nextcord.utils.utcnow()
-
     for member in guild.members:
         if member.bot:
             continue
@@ -949,7 +1169,6 @@ async def dmmesaj(interaction: Interaction,
             await asyncio.sleep(0.5)
         except Exception:
             basarisiz += 1
-
     result_embed = nextcord.Embed(
         title="📩  DM Mesajı Tamamlandı",
         description=(
@@ -959,11 +1178,9 @@ async def dmmesaj(interaction: Interaction,
             f"👥  **Toplam:** `{basarili + basarisiz}` kişi\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
-        color=COLOR_SUCCESS
-    )
+        color=COLOR_SUCCESS)
     result_embed.set_footer(text="✦ Project Nova — DM Sistemi")
     result_embed.timestamp = nextcord.utils.utcnow()
-
     try:
         await interaction.user.send(embed=result_embed)
     except Exception:
@@ -1176,6 +1393,23 @@ async def unban(interaction: Interaction,
     except Exception as e:
         await interaction.response.send_message(
             embed=nova_embed("❌ Hata", f"Yasak kaldırılamadı: {e}", COLOR_ERROR), ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════
+#         UYARI SIFIRLA — /uyari-sifirla  (Admin)
+# ═══════════════════════════════════════════════════════════════
+
+@bot.slash_command(name="uyari-sifirla", description="🔄 Belirtilen üyenin uyarı sayısını sıfırlar. (Admin)")
+async def uyari_sifirla(interaction: Interaction,
+    uye: nextcord.Member = SlashOption(name="uye", description="Uyarısı sıfırlanacak üye", required=True)):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    onceki = warn_count.get(uye.id, 0)
+    warn_count[uye.id] = 0
+    await interaction.response.send_message(
+        embed=nova_embed("🔄  Uyarı Sıfırlandı",
+            f"**Üye:** {uye.mention}\n**Önceki Uyarı:** `{onceki}`\n**Yeni Uyarı:** `0`",
+            COLOR_SUCCESS))
 
 # ═══════════════════════════════════════════════════════════════
 #            ÜYE SAYISI — /uyesayisi
