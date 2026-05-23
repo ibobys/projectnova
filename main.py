@@ -36,48 +36,67 @@ COLOR_TICKET   = 0x5865F2
 # ═══════════════════════════════════════════════════════════════
 
 BANNED_WORDS = [
+    # ── Türkçe Küfür Kısaltmaları & Argo ────────────────────────
+    "amk", "sg", "oç", "mk", "ylo", "bok",
+    "orospu çocuğu", "oc", "o.c", "o.ç",
+    "s.g", "s*g", "amq", "a.m.k", "a.m.q",
+    "sktr", "sktir", "sktir git", "stg", "stfu",
+    "wtf", "wth", "kys", "gtfo",
+
     # ── Türkçe Küfür (doğrudan & varyant) ──────────────────────
-    "amk", "amına", "amını", "amın", "bok", "boktan", "boklu",
-    "oç", "orospu", "orospuçocuğu", "orospunun", "piç", "piçlik",
+    "amına", "amını", "amın", "boktan", "boklu",
+    "orospu", "orospuçocuğu", "orospunun", "piç", "piçlik",
     "göt", "götü", "götveren", "sik", "sikin", "sikik", "sikiş",
     "sikeyim", "siktir", "siktirin", "sikerim", "siktirgit",
     "yarrak", "yarrağı", "yarak", "yaraklar", "çük",
-    "ibne", "ibnelik", "oğlan", "pezeveng", "pezevenk",
+    "ibne", "ibnelik", "pezeveng", "pezevenk",
     "kahpe", "kahpeler", "kaltak", "şerefsiz", "şerefsizlik",
     "haysiyetsiz", "namussuz", "namussuzu", "gerizekalı",
     "geri zekalı", "salak", "aptal", "mal", "dangalak",
-    "sürtük", "fahişe", "bitch", "whore", "fuck", "fucker",
-    "fucking", "shit", "asshole", "pussy", "dick", "cock",
-    "bastard", "motherfucker", "cunt", "nigga", "nigger",
+    "sürtük", "fahişe",
+
+    # ── İngilizce Küfür & Kısaltmaları ──────────────────────────
+    "bitch", "btch", "b1tch", "b!tch",
+    "whore", "wh0re",
+    "fuck", "fck", "f*ck", "f.uck", "fucker", "fucking", "fuk",
+    "shit", "sh!t", "sh1t", "sht",
+    "asshole", "a**hole", "a55hole",
+    "pussy", "p*ssy", "p.ussy",
+    "dick", "d1ck", "d*ck",
+    "cock", "c0ck",
+    "bastard", "b4stard",
+    "motherfucker", "mf", "mofo",
+    "cunt", "c*nt",
+    "nigga", "nigger", "n1gga", "n*gga",
+    "ass", "a55",
 
     # ── Dini Hakaretler ─────────────────────────────────────────
     "allaha küfür", "allaha sövme", "dinsiz", "imansız",
-    "gavur", "kâfir",          # hakaret amacıyla kullanım
+    "gavur", "kâfir",
     "piç kurusu", "it oğlu it",
     "peygambere hakaret", "kurana hakaret", "islama hakaret",
-    "tanrıya küfür", "dine sövme", "allah'a söveyim",
-    "mevlüte küfür", "camiye küfür", "allah", "kitab", "kitapını"
+    "tanrıya küfür", "dine sövme", "allaha söveyim",
+    "mevlüte küfür", "camiye küfür",
+    "allah belanı versin", "allah kahretsin",
+    "dini bozuk", "imansız herif",
 
     # ── Milliyetçilik Karşıtı / Irkçı ───────────────────────────
     "türk değil", "türkler hayvan", "türkler it",
     "kürtler hayvan", "ermeniler it", "yunanlar domuz",
-    "arap pisi", "zenci", "çingene",   # aşağılayıcı bağlamda
-    "atatürke hakaret", "atatürk it", "atatürk domuz",
-    "bayrak yakıyorum", "türk bayrağı", # olumsuz bağlamda algı
+    "arap pisi", "zenci", "çingene",
+    "atatürk it", "atatürk domuz", "atatürke sövme",
     "vatan hain", "vatansız",
 
     # ── Nefret Söylemi ──────────────────────────────────────────
-    "eşcinsel", "ibne",        # hakaret bağlamında
     "trans it", "gay pis",
-    "hate speech", "kill yourself", "kys",
-    "ölüm dilek", "ölmesini istiyorum",
+    "hate speech", "kill yourself",
+    "ölmesini istiyorum",
     "kendini öldür", "intihar et",
 
-    # ── Yaygın Harf Değiştirme Varyantları ──────────────────────
+    # ── Harf Değiştirme Varyantları ─────────────────────────────
     "s1ktir", "s!ktir", "s.iktir",
     "a.mına", "a_mına", "a-mına",
     "or0spu", "0rospu",
-    "f.uck", "f*ck", "sh!t", "b!tch",
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -441,8 +460,13 @@ async def on_message(message: nextcord.Message):
     if message.author.bot:
         return
 
-    # Admin mesajlarını moderasyondan muaf tut
-    is_mod = message.author.guild_permissions.administrator if message.guild else False
+    # Admin / Moderatör muafiyeti
+    # administrator, manage_messages veya manage_guild yetkisi olanlar muaf
+    if message.guild:
+        perms  = message.author.guild_permissions
+        is_mod = perms.administrator or perms.manage_messages or perms.manage_guild
+    else:
+        is_mod = False
 
     # ── Embed Relay Kanalı ──────────────────────────────────────
     if message.channel.id == EMBED_RELAY_CH_ID:
@@ -1440,5 +1464,136 @@ async def uyesayisi(interaction: Interaction):
 # ═══════════════════════════════════════════════════════════════
 #                        BAŞLAT
 # ═══════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════
+#     URL YÖNETİMİ — /url-whitelist  /url-blacklist  (Admin)
+# ═══════════════════════════════════════════════════════════════
+
+@bot.slash_command(name="url-whitelist", description="✅ URL engelleyiciye izin verilen domain ekle/kaldır. (Admin)")
+async def url_whitelist(interaction: Interaction,
+    islem: str = SlashOption(name="islem", description="ekle / kaldir / listele", required=True,
+        choices=["ekle", "kaldir", "listele"]),
+    domain: str = SlashOption(name="domain", description="Örn: example.com", required=False, default="")):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+
+    if islem == "listele":
+        liste = "\n".join(f"`{d}`" for d in ALLOWED_DOMAINS)
+        return await interaction.response.send_message(
+            embed=nova_embed("✅  İzin Verilen Domainler", liste or "Liste boş.", COLOR_INFO), ephemeral=True)
+
+    if not domain:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Domain girilmedi.", COLOR_ERROR), ephemeral=True)
+
+    domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
+
+    if islem == "ekle":
+        if domain in ALLOWED_DOMAINS:
+            return await interaction.response.send_message(
+                embed=nova_embed("⚠️ Zaten Var", f"`{domain}` zaten listede.", COLOR_WARNING), ephemeral=True)
+        ALLOWED_DOMAINS.append(domain)
+        await interaction.response.send_message(
+            embed=nova_embed("✅ Eklendi", f"`{domain}` izin listesine eklendi.", COLOR_SUCCESS), ephemeral=True)
+
+    elif islem == "kaldir":
+        if domain not in ALLOWED_DOMAINS:
+            return await interaction.response.send_message(
+                embed=nova_embed("⚠️ Bulunamadı", f"`{domain}` listede yok.", COLOR_WARNING), ephemeral=True)
+        ALLOWED_DOMAINS.remove(domain)
+        await interaction.response.send_message(
+            embed=nova_embed("🗑️ Kaldırıldı", f"`{domain}` izin listesinden kaldırıldı.", COLOR_SUCCESS), ephemeral=True)
+
+
+@bot.slash_command(name="url-blacklist", description="🚫 URL engelleyiciye yasaklı domain ekle/kaldır. (Admin)")
+async def url_blacklist(interaction: Interaction,
+    islem: str = SlashOption(name="islem", description="ekle / kaldir / listele", required=True,
+        choices=["ekle", "kaldir", "listele"]),
+    domain: str = SlashOption(name="domain", description="Örn: spam.com", required=False, default="")):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+
+    if islem == "listele":
+        liste = "\n".join(f"`{d}`" for d in BLOCKED_DOMAINS)
+        return await interaction.response.send_message(
+            embed=nova_embed("🚫  Yasaklı Domainler", liste or "Liste boş.", COLOR_INFO), ephemeral=True)
+
+    if not domain:
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Hata", "Domain girilmedi.", COLOR_ERROR), ephemeral=True)
+
+    domain = domain.lower().strip().removeprefix("https://").removeprefix("http://").split("/")[0]
+
+    if islem == "ekle":
+        if domain in BLOCKED_DOMAINS:
+            return await interaction.response.send_message(
+                embed=nova_embed("⚠️ Zaten Var", f"`{domain}` zaten yasaklı listede.", COLOR_WARNING), ephemeral=True)
+        BLOCKED_DOMAINS.append(domain)
+        await interaction.response.send_message(
+            embed=nova_embed("🚫 Eklendi", f"`{domain}` yasaklı listeye eklendi.", COLOR_SUCCESS), ephemeral=True)
+
+    elif islem == "kaldir":
+        if domain not in BLOCKED_DOMAINS:
+            return await interaction.response.send_message(
+                embed=nova_embed("⚠️ Bulunamadı", f"`{domain}` listede yok.", COLOR_WARNING), ephemeral=True)
+        BLOCKED_DOMAINS.remove(domain)
+        await interaction.response.send_message(
+            embed=nova_embed("✅ Kaldırıldı", f"`{domain}` yasaklı listeden kaldırıldı.", COLOR_SUCCESS), ephemeral=True)
+
+
+@bot.slash_command(name="kufur-ekle", description="🤬 Küfür listesine yeni kelime ekle. (Admin)")
+async def kufur_ekle(interaction: Interaction,
+    kelime: str = SlashOption(name="kelime", description="Eklenecek yasaklı kelime/kısaltma", required=True)):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    kelime = kelime.lower().strip()
+    if kelime in BANNED_WORDS:
+        return await interaction.response.send_message(
+            embed=nova_embed("⚠️ Zaten Var", f"`{kelime}` zaten küfür listesinde.", COLOR_WARNING), ephemeral=True)
+    BANNED_WORDS.append(kelime)
+    await interaction.response.send_message(
+        embed=nova_embed("✅ Eklendi", f"`{kelime}` küfür listesine eklendi.", COLOR_SUCCESS), ephemeral=True)
+
+
+@bot.slash_command(name="kufur-kaldir", description="🗑️ Küfür listesinden kelime kaldır. (Admin)")
+async def kufur_kaldir(interaction: Interaction,
+    kelime: str = SlashOption(name="kelime", description="Kaldırılacak kelime", required=True)):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    kelime = kelime.lower().strip()
+    if kelime not in BANNED_WORDS:
+        return await interaction.response.send_message(
+            embed=nova_embed("⚠️ Bulunamadı", f"`{kelime}` listede yok.", COLOR_WARNING), ephemeral=True)
+    BANNED_WORDS.remove(kelime)
+    await interaction.response.send_message(
+        embed=nova_embed("🗑️ Kaldırıldı", f"`{kelime}` küfür listesinden kaldırıldı.", COLOR_SUCCESS), ephemeral=True)
+
+
+@bot.slash_command(name="kufur-listesi", description="📋 Mevcut küfür listesini gösterir. (Admin)")
+async def kufur_listesi(interaction: Interaction):
+    if not await is_admin(interaction):
+        return await interaction.response.send_message(
+            embed=nova_embed("❌ Yetki Yok", "Bu komut yalnızca adminler içindir.", COLOR_ERROR), ephemeral=True)
+    chunks = []
+    current = ""
+    for w in BANNED_WORDS:
+        entry = f"`{w}` "
+        if len(current) + len(entry) > 900:
+            chunks.append(current)
+            current = entry
+        else:
+            current += entry
+    if current:
+        chunks.append(current)
+    embed = nextcord.Embed(title=f"📋  Küfür Listesi ({len(BANNED_WORDS)} kelime)", color=COLOR_INFO)
+    for i, chunk in enumerate(chunks[:5]):  # max 5 field
+        embed.add_field(name=f"Grup {i+1}", value=chunk, inline=False)
+    embed.set_footer(text="✦ Project Nova — Moderasyon")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 bot.run(TOKEN)
